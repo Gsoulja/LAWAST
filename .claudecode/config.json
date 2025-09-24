@@ -1,0 +1,36 @@
+{
+  "commands": {
+    "analyze": {
+      "description": "Perform deep code analysis including dependencies, impact, and security",
+      "path": "commands/analyze.md"
+    },
+    "review": {
+      "description": "Perform comprehensive code review focusing on quality and maintainability",
+      "path": "commands/review.md"
+    },
+    "commit": {
+      "description": "Create a git commit following project standards and linking to kanban tasks",
+      "path": "commands/commit.md"
+    },
+    "create-task": {
+      "description": "Create a new task with dependency analysis and automatic task splitting",
+      "path": "commands/create-task.md"
+    },
+    "start-task": {
+      "description": "Move task from backlog to ongoing with full dependency and impact analysis",
+      "path": "commands/start-task.md"
+    },
+    "review-task": {
+      "description": "Move task from ongoing to review with comprehensive code quality analysis",
+      "path": "commands/review-task.md"
+    },
+    "complete-task": {
+      "description": "Move task from review to done and create git commit",
+      "path": "commands/complete-task.md"
+    },
+    "merge-to-uat": {
+      "description": "Merge dev branch into UAT for testing with validation checks",
+      "path": "commands/merge-to-uat.md"
+    }
+  }
+}

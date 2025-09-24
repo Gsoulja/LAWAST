@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  neo4j:
+    image: neo4j:5-community
+    container_name: lawast-neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    environment:
+      # Authentication
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-lawast2024}
+
+      # Memory Configuration (adjust based on available RAM)
+      - NEO4J_server_memory_heap_initial__size=2G
+      - NEO4J_server_memory_heap_max__size=4G
+      - NEO4J_server_memory_pagecache_size=2G
+
+      # Performance Settings
+      - NEO4J_db_transaction_timeout=30s
+      - NEO4J_db_lock_acquisition_timeout=30s
+
+      # APOC Plugin (useful for advanced operations)
+      - NEO4JLABS_PLUGINS=["apoc"]
+
+      # Database settings
+      - NEO4J_server_directories_import=/import
+
+    volumes:
+      # Data persistence
+      - ./data/neo4j/data:/data
+      - ./data/neo4j/logs:/logs
+      - ./data/neo4j/import:/import
+      - ./data/neo4j/plugins:/plugins
+
+    healthcheck:
+      test: ["CMD", "neo4j", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+    networks:
+      - lawast-network
+
+networks:
+  lawast-network:
+    driver: bridge
+    name: lawast-network
+
+volumes:
+  neo4j_data:
+  neo4j_logs:

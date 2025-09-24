@@ -1,0 +1,6 @@
+[submodule "fedlex"]
+	path = fedlex
+	url = https://github.com/droid-f/fedlex.git
+[submodule "fedlex-assets"]
+	path = fedlex-assets
+	url = https://github.com/droid-f/fedlex-assets.git
