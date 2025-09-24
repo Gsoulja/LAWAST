@@ -6,13 +6,32 @@ rich>=13.0.0
 # Graph Database
 neo4j>=5.14.0
 python-dotenv>=1.0.0
+
+# JSON Processing (TASK-003)
+ijson>=3.2.0  # Streaming JSON parser for large files
+# orjson>=3.9.0  # Optional: Faster JSON parsing (uncomment if needed)
+
+# HTML Processing (TASK-005 - future)
+# beautifulsoup4>=4.12.2
+# lxml>=4.9.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.0
+
+# Development Tools (optional but recommended)
+# black>=23.0.0  # Code formatter
+# flake8>=6.0.0  # Linter
+# mypy>=1.5.0  # Type checker
+
+# Future dependencies (currently commented)
 # sentence-transformers>=2.2.2
 # langchain>=0.1.0
 # qdrant-client>=1.7.0
-# beautifulsoup4>=4.12.2
 # fastapi>=0.104.0
 # uvicorn>=0.24.0
 # pydantic>=2.0.0
 # pyyaml>=6.0
 # numpy>=1.24.0
-# tqdm>=4.66.0
+# tqdm>=4.66.0  # Not needed - using rich instead
