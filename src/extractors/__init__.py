@@ -13,6 +13,7 @@ from .html_reference_extractor import HTMLReferenceExtractor, HTMLPaginationHand
 from .reference_patterns import ReferencePatternDetector, LawCodeMapper
 from .reference_cache import ReferenceCache
 from .taxonomy_extractor import TaxonomyExtractor
+from .article_extractor import ArticleExtractor, Article, ArticleContent, Paragraph, Subpoint
 
 __all__ = [
     'RelationshipExtractor',
@@ -29,5 +30,10 @@ __all__ = [
     'ReferencePatternDetector',
     'LawCodeMapper',
     'ReferenceCache',
-    'TaxonomyExtractor'
+    'TaxonomyExtractor',
+    'ArticleExtractor',
+    'Article',
+    'ArticleContent',
+    'Paragraph',
+    'Subpoint'
 ]
