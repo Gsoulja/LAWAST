@@ -12,6 +12,7 @@ from .act_extractor import ActExtractor
 from .html_reference_extractor import HTMLReferenceExtractor, HTMLPaginationHandler
 from .reference_patterns import ReferencePatternDetector, LawCodeMapper
 from .reference_cache import ReferenceCache
+from .taxonomy_extractor import TaxonomyExtractor
 
 __all__ = [
     'RelationshipExtractor',
@@ -27,5 +28,6 @@ __all__ = [
     'HTMLPaginationHandler',
     'ReferencePatternDetector',
     'LawCodeMapper',
-    'ReferenceCache'
+    'ReferenceCache',
+    'TaxonomyExtractor'
 ]
