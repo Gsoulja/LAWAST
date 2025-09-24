@@ -7,6 +7,9 @@ import tempfile
 from pathlib import Path
 from datetime import datetime
 from unittest.mock import Mock, patch, MagicMock
+import sys
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data_access.fedlex_parser import FedlexParser
 from src.extractors.law_extractor import LawExtractor

@@ -339,61 +339,110 @@ class CompleteGraphBuilder:
         """Process HTML files for article content and references"""
         phase_start = time.time()
 
-        console.print(f"\n[bold cyan]🌐 Phase 3: HTML Processing (Optional)[/bold cyan]")
+        console.print(f"\n[bold cyan]🌐 Phase 3: Reference Extraction from HTML[/bold cyan]")
 
         if not Path('fedlex-assets').exists():
             console.print("[yellow]⚠️  fedlex-assets directory not found, skipping HTML[/yellow]")
             return
 
-        console.print("[yellow]⚠️  HTML processing is slow (large files)[/yellow]")
-        if not Confirm.ask("Process HTML files?", default=False):
-            console.print("Skipping HTML processing")
-            return
+        # Import extractors
+        from src.extractors.html_reference_extractor import HTMLReferenceExtractor, HTMLPaginationHandler
+        from src.extractors.article_extractor import ArticleExtractor
+        from src.data_access.batch_processor import BatchProcessor
 
-        # Import HTML extractor
-        from src.extractors.html_reference_extractor import HTMLReferenceExtractor
-
+        # Initialize components
         html_extractor = HTMLReferenceExtractor()
-        html_files = list(Path('fedlex-assets').rglob('*.html'))[:limit] if limit else list(Path('fedlex-assets').rglob('*.html'))[:100]
+        article_extractor = ArticleExtractor()
+        pagination_handler = HTMLPaginationHandler()
+        batch_processor = BatchProcessor(self.connection)
 
-        console.print(f"Processing {len(html_files)} HTML files...")
+        # Collect HTML files
+        html_files = list(Path('fedlex-assets').rglob('*.html'))
+        if limit:
+            html_files = html_files[:limit]
+
+        # Group paginated files
+        file_groups = pagination_handler.group_paginated_files(html_files)
+
+        console.print(f"Found {len(html_files):,} HTML files in {len(file_groups):,} documents")
+        console.print("[dim]Processing with article extraction and reference detection...[/dim]")
 
         html_processed = 0
+        articles_extracted = 0
         references_extracted = 0
+        relationships_to_create = []
 
-        with Progress() as progress:
-            task = progress.add_task("[cyan]Processing HTML...", total=len(html_files))
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn()
+        ) as progress:
+            task = progress.add_task("[cyan]Processing HTML documents...", total=len(file_groups))
 
-            for html_file in html_files:
+            for base_doc, file_list in file_groups.items():
                 try:
-                    # Extract references from HTML
-                    result = html_extractor.extract_from_html_file(str(html_file))
+                    # Process paginated document or single file
+                    if len(file_list) > 1:
+                        # Paginated document
+                        result = html_extractor.process_paginated_document(file_list)
+                    else:
+                        # Single file - extract both articles and references
+                        file_path = str(file_list[0])
+
+                        # Extract articles with embedded references
+                        article_result = article_extractor.extract(file_path)
+
+                        # Also run dedicated reference extraction for document-level refs
+                        ref_result = html_extractor.extract_from_html_file(file_path)
+
+                        # Combine results
+                        result = article_result
+                        if ref_result and ref_result.relationships:
+                            for rel in ref_result.relationships:
+                                result.add_relationship(rel[0], rel[1], rel[2], rel[3] if len(rel) > 3 else {})
 
                     # Process the extraction result
                     if result:
-                        # Check if extraction had errors
-                        if result.errors:
-                            for error in result.errors:
-                                self.stats['errors'].append(f"HTML: {html_file.name}: {error[:50]}")
+                        # Count statistics
+                        if result.nodes:
+                            articles_extracted += len(result.nodes)
 
-                        # Count extracted references from relationships
                         if result.relationships:
-                            html_processed += 1
-                            refs_count = len(result.relationships)
+                            refs_count = len([r for r in result.relationships if r[2] == "REFERENCES"])
                             references_extracted += refs_count
-                            self.stats['relationships_created'] += refs_count
+                            relationships_to_create.extend(result.relationships)
+
+                        html_processed += 1
+
+                        # Batch create relationships periodically
+                        if len(relationships_to_create) >= 1000:
+                            batch_processor.batch_create_relationships(relationships_to_create)
+                            relationships_to_create = []
 
                 except Exception as e:
-                    self.stats['errors'].append(f"HTML: {html_file.name}: {str(e)[:50]}")
+                    self.stats['errors'].append(f"HTML: {base_doc}: {str(e)[:50]}")
 
                 progress.update(task, advance=1)
 
-        self.stats['phase_times']['html'] = time.time() - phase_start
+        # Create remaining relationships
+        if relationships_to_create:
+            batch_processor.batch_create_relationships(relationships_to_create)
 
-        console.print(f"\n✅ HTML Processing Complete:")
-        console.print(f"   • Files processed: {html_processed:,}")
-        console.print(f"   • References extracted: {references_extracted:,}")
+        self.stats['phase_times']['html'] = time.time() - phase_start
+        self.stats['relationships_created'] += references_extracted
+
+        console.print(f"\n✅ HTML & Reference Extraction Complete:")
+        console.print(f"   • Documents processed: {html_processed:,}")
+        console.print(f"   • Articles extracted: {articles_extracted:,}")
+        console.print(f"   • References found: {references_extracted:,}")
         console.print(f"   • Time: {self.stats['phase_times']['html']:.1f} seconds")
+
+        # Show extraction rate
+        if self.stats['phase_times']['html'] > 0:
+            rate = references_extracted / self.stats['phase_times']['html']
+            console.print(f"   • Extraction rate: {rate:.0f} references/second")
 
     def verify_graph(self):
         """Verify the final graph state"""

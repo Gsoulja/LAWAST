@@ -95,9 +95,9 @@ def main():
                 check_database_state()
         
         elif choice == "3":
-            # HTML reference test
-            cmd = 'python scripts/run_html_reference_extraction.py --limit 10'
-            if run_command(cmd, "HTML Reference Miner"):
+            # HTML reference test with article extraction
+            cmd = 'python scripts/build_complete_graph.py --html-only --limit 10'
+            if run_command(cmd, "HTML Article & Reference Extraction"):
                 check_database_state()
         
         elif choice == "4":

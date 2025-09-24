@@ -7,6 +7,9 @@ import pytest
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
+import sys
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.extractors.html_reference_extractor import HTMLReferenceExtractor, HTMLPaginationHandler
 from src.extractors.reference_patterns import ReferencePatternDetector
@@ -255,11 +258,11 @@ class TestHTMLReferenceExtractor:
 
 class TestIntegration:
     """Integration tests for the complete system"""
-    
+
     def test_pattern_detector_integration(self):
         """Test that pattern detector works with realistic legal text"""
         detector = ReferencePatternDetector()
-        
+
         # Realistic German legal text
         german_text = """
         Die Bestimmungen des Obligationenrechts (Art. 1 ff. OR) gelten auch hier.
@@ -267,16 +270,84 @@ class TestIntegration:
         Nach Art. 12 DSG sind personenbezogene Daten zu schützen.
         Siehe auch AS 2023 1234 und BBl 2023 III 567.
         """
-        
+
         references = detector.find_references(german_text, "de")
-        
+
         # Should find multiple references
         assert len(references) >= 3
-        
+
         # Should find different types of references
         law_codes = {r.get('law') for r in references}
         assert 'OR' in law_codes or 'DSG' in law_codes
-    
+
+    def test_multilingual_pattern_detection(self):
+        """Test pattern detection across all supported languages"""
+        detector = ReferencePatternDetector()
+
+        test_cases = [
+            ("de", "Gemäss Art. 335b OR und Art. 12 ZGB", ["OR", "ZGB"]),
+            ("fr", "Selon l'art. 269 CO et art. 12 CC", ["CO", "CC"]),
+            ("it", "Secondo l'art. 269 CO e articolo 12", ["CO"]),
+            ("rm", "Tenor l'artitgel 12 e art. 15", []),
+        ]
+
+        for lang, text, expected_laws in test_cases:
+            references = detector.find_references(text, lang)
+            found_laws = {r.get('law') for r in references if r.get('law')}
+
+            for expected_law in expected_laws:
+                assert expected_law in found_laws, f"Failed to find {expected_law} in {lang} text"
+
+    def test_complex_reference_formats(self):
+        """Test detection of complex reference formats"""
+        detector = ReferencePatternDetector()
+
+        # Test range references
+        text = "Die Art. 5-10 OR sowie Art. 15 bis 20 ZGB sind anwendbar."
+        references = detector.find_references(text, "de")
+        assert len(references) >= 2
+
+        # Test references with subsections
+        text = "Nach Art. 5 Abs. 2 lit. a OR gilt dies."
+        references = detector.find_references(text, "de")
+        assert len(references) >= 1
+
+    def test_sr_number_extraction(self):
+        """Test SR number reference extraction"""
+        detector = ReferencePatternDetector()
+
+        text = "Siehe SR 220, SR 311.0 und RS 235.1 für Details."
+        references = detector.find_references(text, "de")
+
+        sr_refs = [r for r in references if 'SR' in r.get('normalized', '')]
+        assert len(sr_refs) >= 2
+
+        # Check normalization
+        normalized = {r.get('normalized') for r in references}
+        assert "SR 220" in normalized or "SR 311.0" in normalized
+
+    def test_performance_benchmark(self):
+        """Test that reference extraction meets performance targets"""
+        import time
+        detector = ReferencePatternDetector()
+
+        # Create text with many references
+        text = " ".join([f"Art. {i} OR" for i in range(1, 501)])  # 500 references
+        text += " " + " ".join([f"SR {i}.{j}" for i in range(100, 110) for j in range(10)])  # 100 SR refs
+
+        start_time = time.time()
+        references = detector.find_references(text, "de")
+        elapsed = time.time() - start_time
+
+        # Should find at least 500 references
+        assert len(references) >= 500
+
+        # Calculate extraction rate
+        rate = len(references) / elapsed if elapsed > 0 else 0
+
+        # Should achieve > 1000 references/second
+        assert rate > 1000, f"Extraction rate {rate:.0f} refs/sec is below target of 1000 refs/sec"
+
     @pytest.mark.integration
     def test_full_extraction_pipeline(self):
         """Test the complete extraction pipeline (requires setup)"""

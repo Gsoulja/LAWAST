@@ -26,6 +26,8 @@ import regex
 
 from .base_extractor import BaseExtractor, ExtractionResult
 from ..parsers.unified_html_parser import UnifiedHtmlParser
+from .html_reference_extractor import HTMLReferenceExtractor
+from .reference_patterns import ReferencePatternDetector
 
 logger = logging.getLogger(__name__)
 
@@ -85,9 +87,9 @@ class ArticleExtractor(BaseExtractor):
     # CSS selectors for article elements (validated from html-extraction-analysis.md)
     SELECTORS = {
         'articles': 'article',
-        'article_heading': 'h6.heading',
-        'article_content': 'div.collapseable',
-        'article_title': 'h6.heading a',
+        'article_heading': 'h6.heading, h6',  # Support both with and without .heading class
+        'article_content': 'div.collapseable, div.content',  # Support different content wrappers
+        'article_title': 'h6.heading a, h6 a',
         'paragraphs': 'p',
         'definition_lists': 'dl',
         'definition_terms': 'dt',
@@ -124,6 +126,7 @@ class ArticleExtractor(BaseExtractor):
         """
         super().__init__()
         self.parser = parser or UnifiedHtmlParser(cache_size=1000)
+        self.reference_detector = ReferencePatternDetector()
 
     def extract(self, html_content_or_path: Any, file_path: str = None) -> ExtractionResult:
         """
@@ -229,8 +232,18 @@ class ArticleExtractor(BaseExtractor):
             # Extract metadata
             metadata = self._extract_article_metadata(element)
 
-            # Generate URI
-            uri = self._generate_article_uri(file_path, number) if file_path else article_id
+            # Extract references from article content
+            references = self._extract_article_references(element, language)
+            if references:
+                metadata['references'] = references
+
+            # Generate URI (prefer article_id if available, otherwise generate from path)
+            if article_id:
+                uri = article_id
+            elif file_path:
+                uri = self._generate_article_uri(file_path, number)
+            else:
+                uri = f"article_{number}"
 
             # Create article object
             article = Article(
@@ -602,6 +615,42 @@ class ArticleExtractor(BaseExtractor):
 
         return None
 
+    def _extract_article_references(self, element: Tag, language: str) -> List[Dict[str, Any]]:
+        """
+        Extract legal references from article content.
+
+        Args:
+            element: Article element
+            language: Language code
+
+        Returns:
+            List of reference dictionaries
+        """
+        references = []
+
+        try:
+            # Get full text content of article
+            text_content = element.get_text(separator=' ', strip=True)
+
+            # Use reference detector to find all references
+            found_references = self.reference_detector.find_references(text_content, language)
+
+            for ref in found_references:
+                reference_data = {
+                    'raw_text': ref.get('raw_text'),
+                    'target_law': ref.get('law'),
+                    'target_article': ref.get('article'),
+                    'normalized': ref.get('normalized'),
+                    'confidence': ref.get('confidence', 0.8),
+                    'language': language
+                }
+                references.append(reference_data)
+
+        except Exception as e:
+            self.logger.debug(f"Error extracting references: {e}")
+
+        return references
+
     def _generate_article_uri(self, file_path: str, article_number: str) -> str:
         """
         Generate URI for article based on file path and article number.
@@ -680,6 +729,23 @@ class ArticleExtractor(BaseExtractor):
         }
 
         result.add_node(node)
+
+        # Create REFERENCES relationships from extracted references
+        if 'references' in article.metadata:
+            for ref in article.metadata['references']:
+                # Create relationship to referenced entity
+                result.add_relationship(
+                    article.uri,
+                    ref['normalized'],
+                    "REFERENCES",
+                    {
+                        'raw_text': ref['raw_text'],
+                        'confidence': ref['confidence'],
+                        'language': ref['language'],
+                        'target_law': ref.get('target_law'),
+                        'target_article': ref.get('target_article')
+                    }
+                )
 
         # Create relationships if we can determine the parent law
         # This would typically be done by the integration layer

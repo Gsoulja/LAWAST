@@ -12,6 +12,9 @@ Tests all article extraction functionality including:
 import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
+import sys
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from bs4 import BeautifulSoup
 

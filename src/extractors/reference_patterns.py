@@ -124,62 +124,119 @@ class ReferencePatternDetector:
     def _compile_patterns(self):
         """Compile regex patterns for each language"""
         
+        # Define article number suffix pattern
+        article_suffix = r'(?:[a-z]|bis|ter|quater|quinquies|sexies|septies|octies|novies|decies)'
+
         # German patterns
         self.german_patterns = [
-            # Art. 335b OR, Art. 12 DSG
+            # Range references: Art. 5-10 OR, Art. 5 bis 10 ZGB, Art. 5bis-10ter
             regex.compile(
-                r'\b(?:Art\.|Artikel)\s*(\d+[a-z]?)\s+([A-Z]{2,5})\b',
+                rf'\b(?:Art\.|Artikel|Articles)\s*(\d+{article_suffix}?)(?:\s*[-–]\s*|\s+bis\s+)(\d+{article_suffix}?)(?:\s+([A-Z]{{2,5}}))?\b',
                 regex.IGNORECASE
             ),
-            
-            # gemäss Art. 23, nach Art. 15
+
+            # List references: Art. 5, 7 und 9 OR (must have comma or und, exclude "bis" as law code)
             regex.compile(
-                r'\b(?:gemäss|nach|laut)\s+(?:Art\.|Artikel)\s*(\d+[a-z]?)\b',
+                rf'\b(?:Art\.|Artikel)\s*(\d+{article_suffix}?)(?:\s*,\s*\d+{article_suffix}?)+(?:\s+und\s+\d+{article_suffix}?)?(?:\s+(?!bis\b)([A-Z]{{2,5}}))?\b',
                 regex.IGNORECASE
             ),
-            
+
+            # Art. 335bis OR, Art. 12 DSG (exclude standalone "bis" as law code)
+            regex.compile(
+                rf'\b(?:Art\.|Artikel)\s*(\d+{article_suffix}?)\s+(?!bis\b)([A-Z]{{2,5}})\b',
+                regex.IGNORECASE
+            ),
+
+            # gemäss Art. 335bis, nach Art. 15ter (exclude "bis" as range indicator)
+            regex.compile(
+                rf'\b(?:gemäss|nach|laut)\s+(?:Art\.|Artikel)\s*(\d+{article_suffix}?)(?!\s+bis\s+\d)\b',
+                regex.IGNORECASE
+            ),
+
+            # Standalone article: Art. 5quater (without law code)
+            regex.compile(
+                rf'\b(?:Art\.|Artikel)\s*(\d+{article_suffix}?)\b(?!\s+[A-Z]{{2,5}})',
+                regex.IGNORECASE
+            ),
+
             # § 12 ArG, § 23
             regex.compile(
                 r'\b§\s*(\d+[a-z]?)\s*([A-Z]{2,5})?\b',
                 regex.IGNORECASE
             ),
-            
+
             # Abs. 2, Absatz 3
             regex.compile(
                 r'\b(?:Abs\.|Absatz)\s*(\d+)\b',
                 regex.IGNORECASE
             ),
-            
+
+            # Ziff. 1, Ziffer 2 (number/point)
+            regex.compile(
+                r'\b(?:Ziff\.|Ziffer)\s*(\d+)\b',
+                regex.IGNORECASE
+            ),
+
+            # lit. a, Bst. b (letters)
+            regex.compile(
+                r'\b(?:lit\.|Bst\.|Buchst\.)\s*([a-z])\b',
+                regex.IGNORECASE
+            ),
+
             # SR references: SR 220, SR 311.0
             regex.compile(
                 r'\bSR\s+([\d.]+)\b',
                 regex.IGNORECASE
             ),
-            
+
             # AS references: AS 2023 1234
             regex.compile(
                 r'\bAS\s+(\d{4})\s+(\d+)\b',
+                regex.IGNORECASE
+            ),
+
+            # RU references: RU 1988 1705 (Recueil officiel)
+            regex.compile(
+                r'\bRU\s+(\d{4})\s+(\d+)\b',
+                regex.IGNORECASE
+            ),
+
+            # FF references: FF 1869 234 (Feuille fédérale)
+            regex.compile(
+                r'\b(?:FF|BBl)\s+(\d{4})\s+(\d+)\b',
                 regex.IGNORECASE
             ),
         ]
         
         # French patterns
         self.french_patterns = [
-            # art. 269 CO, art. 12 LPD
+            # art. 269bis CO, art. 12ter LPD
             regex.compile(
-                r'\b(?:art\.|article)\s*(\d+[a-z]?)\s+([A-Z]{2,5})\b',
+                rf'\b(?:art\.|article)\s*(\d+{article_suffix}?)\s+([A-Z]{{2,5}})\b',
                 regex.IGNORECASE
             ),
-            
-            # selon art. 23, conformément à l'art. 15
+
+            # selon art. 23bis, conformément à l'art. 15ter
             regex.compile(
-                r'\b(?:selon|conformément\s+à)\s+l?\'?(?:art\.|article)\s*(\d+[a-z]?)\b',
+                rf'\b(?:selon|conformément\s+à)\s+l?\'?(?:art\.|article)\s*(\d+{article_suffix}?)\b',
                 regex.IGNORECASE
             ),
             
             # al. 2 (alinéa)
             regex.compile(
                 r'\bal\.\s*(\d+)\b',
+                regex.IGNORECASE
+            ),
+
+            # let. a (lettre)
+            regex.compile(
+                r'\blet\.\s*([a-z])\b',
+                regex.IGNORECASE
+            ),
+
+            # ch. 1 (chiffre)
+            regex.compile(
+                r'\bch\.\s*(\d+)\b',
                 regex.IGNORECASE
             ),
             
@@ -198,21 +255,33 @@ class ReferencePatternDetector:
         
         # Italian patterns
         self.italian_patterns = [
-            # art. 269 CO, articolo 12 LPD
+            # art. 269bis CO, articolo 12ter LPD
             regex.compile(
-                r'\b(?:art\.|articolo)\s*(\d+[a-z]?)\s+([A-Z]{2,5})\b',
+                rf'\b(?:art\.|articolo)\s*(\d+{article_suffix}?)\s+([A-Z]{{2,5}})\b',
                 regex.IGNORECASE
             ),
-            
-            # secondo l'art. 23
+
+            # secondo l'art. 23bis
             regex.compile(
-                r'\bsecondo\s+l\'(?:art\.|articolo)\s*(\d+[a-z]?)\b',
+                rf'\bsecondo\s+l\'(?:art\.|articolo)\s*(\d+{article_suffix}?)\b',
                 regex.IGNORECASE
             ),
             
             # cpv. 2 (capoverso)
             regex.compile(
                 r'\bcpv\.\s*(\d+)\b',
+                regex.IGNORECASE
+            ),
+
+            # lett. a (lettera)
+            regex.compile(
+                r'\blett\.\s*([a-z])\b',
+                regex.IGNORECASE
+            ),
+
+            # n. 1 (numero)
+            regex.compile(
+                r'\bn\.\s*(\d+)\b',
                 regex.IGNORECASE
             ),
             
@@ -287,26 +356,54 @@ class ReferencePatternDetector:
     def _find_german_article_references(self, text: str, language: str) -> List[Dict[str, Any]]:
         """Find German article references"""
         references = []
-        
-        for pattern in self.german_patterns[:4]:  # Article patterns only
+
+        for i, pattern in enumerate(self.german_patterns):  # Process all patterns
             for match in pattern.finditer(text):
                 try:
-                    law_code = None
-                    if len(match.groups()) >= 2 and match.group(2):
-                        # Art. X LAW format
-                        article = match.group(1)
-                        law_code = match.group(2).upper()
-                        raw_text = match.group(0)
-                        normalized = f"{self.law_mapper.normalize_law_code(law_code, language)}:{article}"
-                    elif len(match.groups()) >= 1:
-                        # Art. X format (without law code)
-                        article = match.group(1)
-                        raw_text = match.group(0)
-                        normalized = f"ART:{article}"
-                        law_code = 'UNKNOWN'
-                    else:
-                        continue
-                    
+                    raw_text = match.group(0)
+                    groups = match.groups()
+
+                    # Handle different pattern types
+                    if i == 0:  # Range pattern (Art. 5-10 OR)
+                        if len(groups) >= 2 and groups[0] and groups[1]:
+                            start_article = groups[0]
+                            end_article = groups[1]
+                            law_code = groups[2].upper() if len(groups) > 2 and groups[2] else 'UNKNOWN'
+
+                            # Create reference for the range
+                            article = f"{start_article}-{end_article}"
+                            if law_code != 'UNKNOWN':
+                                normalized = f"{self.law_mapper.normalize_law_code(law_code, language)}:{article}"
+                            else:
+                                normalized = f"ART:{article}"
+                        else:
+                            continue
+
+                    elif i == 1:  # List pattern (Art. 5, 7 und 9 OR)
+                        if len(groups) >= 1:
+                            article = groups[0]
+                            law_code = groups[1].upper() if len(groups) > 1 and groups[1] else 'UNKNOWN'
+                            if law_code != 'UNKNOWN':
+                                normalized = f"{self.law_mapper.normalize_law_code(law_code, language)}:{article}"
+                            else:
+                                normalized = f"ART:{article}"
+                        else:
+                            continue
+
+                    else:  # Standard patterns
+                        if len(groups) >= 2 and groups[1]:
+                            # Art. X LAW format
+                            article = groups[0]
+                            law_code = groups[1].upper()
+                            normalized = f"{self.law_mapper.normalize_law_code(law_code, language)}:{article}"
+                        elif len(groups) >= 1:
+                            # Art. X format (without law code)
+                            article = groups[0]
+                            law_code = 'UNKNOWN'
+                            normalized = f"ART:{article}"
+                        else:
+                            continue
+
                     reference = {
                         'raw_text': raw_text,
                         'law': law_code,
