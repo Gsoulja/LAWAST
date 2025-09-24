@@ -9,6 +9,9 @@ from .base_extractor import BaseExtractor, ExtractionResult
 from .law_extractor import LawExtractor
 from .version_extractor import VersionExtractor
 from .act_extractor import ActExtractor
+from .html_reference_extractor import HTMLReferenceExtractor, HTMLPaginationHandler
+from .reference_patterns import ReferencePatternDetector, LawCodeMapper
+from .reference_cache import ReferenceCache
 
 __all__ = [
     'RelationshipExtractor',
@@ -19,5 +22,10 @@ __all__ = [
     'ExtractionResult',
     'LawExtractor',
     'VersionExtractor',
-    'ActExtractor'
+    'ActExtractor',
+    'HTMLReferenceExtractor',
+    'HTMLPaginationHandler',
+    'ReferencePatternDetector',
+    'LawCodeMapper',
+    'ReferenceCache'
 ]

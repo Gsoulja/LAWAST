@@ -11,9 +11,10 @@ python-dotenv>=1.0.0
 ijson>=3.2.0  # Streaming JSON parser for large files
 # orjson>=3.9.0  # Optional: Faster JSON parsing (uncomment if needed)
 
-# HTML Processing (TASK-005 - future)
-# beautifulsoup4>=4.12.2
-# lxml>=4.9.0
+# HTML Processing (TASK-005)
+beautifulsoup4>=4.12.2
+lxml>=4.9.0
+regex>=2023.0.0
 
 # Testing
 pytest>=7.4.0
