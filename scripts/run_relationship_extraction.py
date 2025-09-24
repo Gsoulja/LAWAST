@@ -221,7 +221,7 @@ def validate_relationships() -> Dict[str, Any]:
     }
 
     for description, query in queries.items():
-        result = connection.execute_read(query)
+        result = connection.execute_query(query)
         if result:
             if isinstance(result[0], dict) and result[0].get('count', 0) > 0:
                 validation['valid'] = False

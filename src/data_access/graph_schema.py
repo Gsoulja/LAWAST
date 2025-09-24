@@ -243,6 +243,10 @@ class GraphSchema:
         # Composite indexes
         f"CREATE INDEX article_law_number IF NOT EXISTS FOR (a:{NodeLabels.ARTICLE.value}) ON (a.law_uri, a.number)",
         f"CREATE INDEX version_law_date IF NOT EXISTS FOR (v:{NodeLabels.VERSION.value}) ON (v.law_uri, v.date_applicable)",
+        # Temporal optimization indexes (TASK-006)
+        f"CREATE INDEX version_date_range IF NOT EXISTS FOR (v:{NodeLabels.VERSION.value}) ON (v.date_applicable, v.date_end_applicable)",
+        f"CREATE INDEX version_date_end IF NOT EXISTS FOR (v:{NodeLabels.VERSION.value}) ON (v.date_end_applicable)",
+        f"CREATE INDEX current_version IF NOT EXISTS FOR (v:{NodeLabels.VERSION.value}) ON (v.is_current)",
     ]
 
     # Language initialization data
