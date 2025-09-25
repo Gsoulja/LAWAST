@@ -18,6 +18,7 @@ class ExtractionResult:
     relationships: List[tuple] = field(default_factory=list)
     statistics: Dict[str, int] = field(default_factory=dict)
     errors: List[str] = field(default_factory=list)
+    data: Any = None  # Store the extracted data object (e.g., TaxonomyResult, Article list)
 
     def add_node(self, node: Dict[str, Any]):
         """Add a node to the extraction result"""

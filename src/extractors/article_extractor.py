@@ -187,6 +187,9 @@ class ArticleExtractor(BaseExtractor):
                     # Convert to graph node
                     self._build_graph_entities(article, result)
 
+            # Store the articles list in the result for access
+            result.data = articles
+
             # Update statistics
             result.statistics['documents_processed'] = 1
             result.statistics['articles_extracted'] = len(articles)
@@ -303,10 +306,67 @@ class ArticleExtractor(BaseExtractor):
 
         # Fallback: try to extract from article ID
         article_id = element.get('id', '')
-        if article_id.startswith('art_'):
-            number = article_id.replace('art_', '')
-            normalized = self._normalize_article_number(number)
-            return number, normalized
+
+        # Handle various ID formats
+        if article_id:
+            # Handle annex articles with paths like "annex_1/lvl_u1/mod_u1" or "annex_3/lvl_d1121e73/art_5"
+            if 'annex_' in article_id:
+                parts = article_id.split('/')
+                annex_num = None
+
+                # Extract annex number
+                for part in parts:
+                    if part.startswith('annex_'):
+                        annex_num = part.replace('annex_', '')
+                        break
+
+                # Look for article or modification
+                for part in parts:
+                    if part.startswith('art_'):
+                        # Extract article number (including Roman numerals and regular numbers)
+                        number = part.replace('art_', '').replace('_', '')
+                        normalized = self._normalize_article_number(number)
+                        # Include annex number in the identifier
+                        if annex_num:
+                            return f"Annex{annex_num}-Art{number}", f"Annex{annex_num}-{normalized}"
+                        return f"Annex-{number}", f"Annex-{normalized}"
+                    elif part.startswith('mod_'):
+                        # Handle modifications
+                        number = part.replace('mod_', '')
+                        if annex_num:
+                            return f"Annex{annex_num}-Mod{number}", f"Annex{annex_num}-Mod{number}"
+                        return f"Mod-{number}", f"Mod-{number}"
+
+                # If no article found in annex, use the last meaningful part
+                last_part = article_id.split('/')[-1]
+                if annex_num:
+                    return f"Annex{annex_num}-{last_part}", article_id
+                return f"Annex-{last_part}", article_id
+
+            # Handle section articles like "lvl_u1/sec_III/art_12"
+            elif 'sec_' in article_id and '/art_' in article_id:
+                # Extract the article part
+                parts = article_id.split('/')
+                for part in parts:
+                    if part.startswith('art_'):
+                        number = part.replace('art_', '').replace('_', '')
+                        normalized = self._normalize_article_number(number)
+                        return number, normalized
+
+            # Handle simple article IDs
+            elif article_id.startswith('art_'):
+                number = article_id.replace('art_', '').replace('_', '')
+                normalized = self._normalize_article_number(number)
+                return number, normalized
+
+            # Handle level articles like "lvl_7/lvl_u1/sec_II/art_9"
+            elif '/art_' in article_id:
+                parts = article_id.split('/')
+                for part in parts:
+                    if part.startswith('art_'):
+                        number = part.replace('art_', '').replace('_', '')
+                        normalized = self._normalize_article_number(number)
+                        return number, normalized
 
         return None, None
 
@@ -319,13 +379,43 @@ class ArticleExtractor(BaseExtractor):
         - "1a" -> "001a"
         - "335b" -> "335b"
         - "1bis" -> "001bis"
+        - "IX" -> "009"
+        - "XII" -> "012"
         """
+        # Handle Roman numerals
+        roman_to_arabic = {
+            'I': 1, 'II': 2, 'III': 3, 'IV': 4, 'V': 5,
+            'VI': 6, 'VII': 7, 'VIII': 8, 'IX': 9, 'X': 10,
+            'XI': 11, 'XII': 12, 'XIII': 13, 'XIV': 14, 'XV': 15,
+            'XVI': 16, 'XVII': 17, 'XVIII': 18, 'XIX': 19, 'XX': 20,
+            'XXI': 21, 'XXII': 22, 'XXIII': 23, 'XXIV': 24, 'XXV': 25,
+            'XXVI': 26, 'XXVII': 27, 'XXVIII': 28, 'XXIX': 29, 'XXX': 30
+        }
+
+        # Check if it's a Roman numeral
+        if number.upper() in roman_to_arabic:
+            arabic_num = roman_to_arabic[number.upper()]
+            return str(arabic_num).zfill(3)
+
+        # Handle mixed format like "II_I" (should be III)
+        if '_' in number:
+            # Split and try to parse each part
+            parts = number.split('_')
+            if all(p.upper() in roman_to_arabic for p in parts):
+                # This might be a malformed Roman numeral
+                # Just join them for now
+                number = ''.join(parts)
+                if number.upper() in roman_to_arabic:
+                    arabic_num = roman_to_arabic[number.upper()]
+                    return str(arabic_num).zfill(3)
+
         # Extract numeric part and suffix
         match = re.match(r'(\d+)(.*)$', number)
         if match:
             num_part = match.group(1).zfill(3)  # Pad with zeros
             suffix_part = match.group(2)
             return f"{num_part}{suffix_part}"
+
         return number
 
     def _extract_article_title(self, element: Tag, language: str) -> Dict[str, str]:
@@ -347,13 +437,23 @@ class ArticleExtractor(BaseExtractor):
             # First try to get the text after the bold tag (common pattern)
             bold_tag = heading.find('b')
             if bold_tag:
-                # Get all text nodes after the bold tag
+                # Get all text nodes after the bold tag, excluding footnotes
                 title_parts = []
                 for sibling in bold_tag.next_siblings:
-                    if isinstance(sibling, str):
-                        title_parts.append(sibling.strip())
+                    # Skip footnote superscripts
+                    if sibling.name == 'sup':
+                        continue
+                    elif isinstance(sibling, str):
+                        text = sibling.strip()
+                        if text:
+                            title_parts.append(text)
                     elif sibling.name:
-                        title_parts.append(sibling.get_text(strip=True))
+                        # Skip links that are just anchors or empty
+                        if sibling.name == 'a' and not sibling.get_text(strip=True):
+                            continue
+                        text = sibling.get_text(strip=True)
+                        if text:
+                            title_parts.append(text)
 
                 title_text = ' '.join(title_parts).strip()
                 if title_text:
@@ -629,21 +729,55 @@ class ArticleExtractor(BaseExtractor):
         references = []
 
         try:
-            # Get full text content of article
+            # First, extract references from HTML links (more reliable)
+            links = element.find_all('a', href=True)
+            for link in links:
+                href = link.get('href', '')
+
+                # Skip footnote links
+                if href.startswith('#fn'):
+                    continue
+
+                # Check if it's a fedlex URL (reference to another law/article)
+                if 'fedlex.data.admin.ch/eli' in href or '/eli/' in href:
+                    reference_data = {
+                        'raw_text': link.get_text(strip=True),
+                        'target_uri': href if href.startswith('http') else f"https://fedlex.data.admin.ch{href}",
+                        'type': 'link',
+                        'language': language
+                    }
+                    references.append(reference_data)
+
+            # Also get text content for pattern detection
             text_content = element.get_text(separator=' ', strip=True)
 
-            # Use reference detector to find all references
+            # Use reference detector to find text-based references
             found_references = self.reference_detector.find_references(text_content, language)
 
             for ref in found_references:
-                reference_data = {
-                    'raw_text': ref.get('raw_text'),
-                    'target_law': ref.get('law'),
-                    'target_article': ref.get('article'),
-                    'normalized': ref.get('normalized'),
-                    'confidence': ref.get('confidence', 0.8),
-                    'language': language
-                }
+                # Handle both dict and object returns
+                if hasattr(ref, 'get'):
+                    # It's a dict
+                    reference_data = {
+                        'raw_text': ref.get('raw_text'),
+                        'target_law': ref.get('law'),
+                        'target_article': ref.get('article'),
+                        'normalized': ref.get('normalized'),
+                        'confidence': ref.get('confidence', 0.8),
+                        'type': 'text',
+                        'language': language
+                    }
+                else:
+                    # It's an object, use getattr
+                    reference_data = {
+                        'raw_text': getattr(ref, 'raw_text', ''),
+                        'target_law': getattr(ref, 'law', None),
+                        'target_article': getattr(ref, 'article', None),
+                        'normalized': getattr(ref, 'normalized', None),
+                        'confidence': getattr(ref, 'confidence', 0.8),
+                        'type': 'text',
+                        'language': language
+                    }
                 references.append(reference_data)
 
         except Exception as e:
@@ -733,19 +867,21 @@ class ArticleExtractor(BaseExtractor):
         # Create REFERENCES relationships from extracted references
         if 'references' in article.metadata:
             for ref in article.metadata['references']:
-                # Create relationship to referenced entity
-                result.add_relationship(
-                    article.uri,
-                    ref['normalized'],
-                    "REFERENCES",
-                    {
-                        'raw_text': ref['raw_text'],
-                        'confidence': ref['confidence'],
-                        'language': ref['language'],
-                        'target_law': ref.get('target_law'),
-                        'target_article': ref.get('target_article')
-                    }
-                )
+                # Create relationship to referenced entity if we have a target
+                target = ref.get('target_uri') or ref.get('normalized')
+                if target:
+                    result.add_relationship(
+                        article.uri,
+                        target,
+                        "REFERENCES",
+                        {
+                            'raw_text': ref.get('raw_text', ''),
+                            'confidence': ref.get('confidence', 0.8),
+                            'language': ref.get('language', ''),
+                            'target_law': ref.get('target_law'),
+                            'target_article': ref.get('target_article')
+                        }
+                    )
 
         # Create relationships if we can determine the parent law
         # This would typically be done by the integration layer

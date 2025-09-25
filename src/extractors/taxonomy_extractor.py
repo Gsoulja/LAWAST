@@ -108,6 +108,7 @@ class TaxonomyExtractor(BaseExtractor):
 
     # SR number domain mapping
     SR_DOMAIN_MAPPING = {
+        '0': 'International Law - Treaties',
         '1': 'State - People - Authorities',
         '2': 'Private Law - Civil Procedure - Enforcement',
         '3': 'Criminal Law - Criminal Procedure - Execution',
@@ -188,6 +189,9 @@ class TaxonomyExtractor(BaseExtractor):
                 language=language,
                 uri=self._generate_uri(file_path) if file_path else None
             )
+
+            # Store the TaxonomyResult in the ExtractionResult for access
+            result.data = taxonomy
 
             # Convert to nodes and relationships
             self._build_graph_entities(taxonomy, result)

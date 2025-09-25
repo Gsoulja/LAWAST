@@ -1,0 +1,12 @@
+{
+  "total_files": 1,
+  "processed_files": 0,
+  "failed_files": 0,
+  "last_processed_file": null,
+  "start_time": "2025-09-25T06:48:23.030837",
+  "errors": [],
+  "statistics": {
+    "current_phase": "relationships",
+    "articles_processed": 16
+  }
+}

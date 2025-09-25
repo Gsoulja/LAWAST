@@ -12,10 +12,10 @@ services:
       # Authentication
       - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-lawast2024}
 
-      # Memory Configuration (adjust based on available RAM)
-      - NEO4J_server_memory_heap_initial__size=2G
-      - NEO4J_server_memory_heap_max__size=4G
-      - NEO4J_server_memory_pagecache_size=2G
+      # Memory Configuration (optimized for 32GB RAM)
+      - NEO4J_server_memory_heap_initial__size=4G
+      - NEO4J_server_memory_heap_max__size=6G
+      - NEO4J_server_memory_pagecache_size=4G
 
       # Performance Settings
       - NEO4J_db_transaction_timeout=30s

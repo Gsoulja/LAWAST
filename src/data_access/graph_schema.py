@@ -11,9 +11,16 @@ class NodeLabels(Enum):
     """Node type labels in the graph"""
     LAW = "Law"
     VERSION = "Version"
+    ACT = "Act"
     ARTICLE = "Article"
+    PARAGRAPH = "Paragraph"
+    SUBPOINT = "Subpoint"
     LANGUAGE = "Language"
     MANIFESTATION = "Manifestation"
+    DOMAIN = "Domain"
+    BOOK = "Book"
+    CHAPTER = "Chapter"
+    SECTION = "Section"
 
 
 class RelationshipTypes(Enum):
@@ -25,6 +32,14 @@ class RelationshipTypes(Enum):
     AMENDS = "AMENDS"
     REFERENCES = "REFERENCES"
     CONTAINS = "CONTAINS"
+    HAS_ARTICLE = "HAS_ARTICLE"
+    HAS_PARAGRAPH = "HAS_PARAGRAPH"
+    HAS_SUBPOINT = "HAS_SUBPOINT"
+    HAS_CHILD = "HAS_CHILD"
+    CITES = "CITES"
+    FOLLOWS = "FOLLOWS"
+    NEXT = "NEXT"
+    BELONGS_TO = "BELONGS_TO"
 
 
 class LanguageCodes(Enum):
@@ -48,19 +63,48 @@ class ManifestationFormats(Enum):
 @dataclass
 class LawNode:
     """
-    Represents a Law node in the graph
+    Represents a Law node in the graph with complete legal metadata
     """
+    # Required fields
     uri: str
     sr_number: str
+
+    # Multilingual titles
     title_de: Optional[str] = None
     title_fr: Optional[str] = None
     title_it: Optional[str] = None
     title_rm: Optional[str] = None
     title_en: Optional[str] = None
-    date_enacted: Optional[datetime] = None
-    date_modified: Optional[datetime] = None
-    type: Optional[str] = None
-    status: Optional[str] = None
+
+    # Date fields
+    date_document: Optional[str] = None  # Original document date
+    date_entry_in_force: Optional[str] = None  # When law became active
+    date_no_longer_in_force: Optional[str] = None  # When law was repealed
+    date_modified: Optional[datetime] = None  # Last modification date
+
+    # Legal status fields
+    in_force: Optional[bool] = None  # Boolean flag for quick filtering
+    in_force_status: Optional[str] = None  # URI to enforcement status vocabulary
+    status: Optional[str] = None  # General status
+
+    # Legal references
+    basic_act: Optional[str] = None  # URI to the original act
+    classified_by_taxonomy: Optional[str] = None  # URI to taxonomy classification
+    type_document: Optional[str] = None  # URI to document type vocabulary
+
+    # Additional metadata
+    type: Optional[str] = None  # Document type
+    language: Optional[str] = None  # Primary language
+    parent_uri: Optional[str] = None  # For hierarchical laws
+
+    # AST properties
+    ast_path: Optional[str] = None  # "/domain_1/section_101/law_101"
+    ast_level: int = 5  # Law is level 5
+    parent_id: Optional[str] = None  # Section ID
+
+    # RAG properties
+    embedding: Optional[List[float]] = None  # For RAG (title embedding)
+
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_cypher_properties(self) -> Dict[str, Any]:
@@ -70,20 +114,36 @@ class LawNode:
             "sr_number": self.sr_number
         }
 
-        # Add optional properties
+        # Add all optional string/bool fields
+        optional_fields = [
+            'date_document', 'date_entry_in_force', 'date_no_longer_in_force',
+            'in_force', 'in_force_status', 'status', 'basic_act',
+            'classified_by_taxonomy', 'type_document', 'type',
+            'language', 'parent_uri'
+        ]
+
+        for field in optional_fields:
+            if hasattr(self, field) and getattr(self, field) is not None:
+                props[field] = getattr(self, field)
+
+        # Add multilingual titles
         for lang in ["de", "fr", "it", "rm", "en"]:
             title_attr = f"title_{lang}"
             if hasattr(self, title_attr) and getattr(self, title_attr):
                 props[title_attr] = getattr(self, title_attr)
 
-        if self.date_enacted:
-            props["date_enacted"] = self.date_enacted.isoformat()
+        # Add AST properties
+        props["ast_level"] = self.ast_level
+        if self.ast_path:
+            props["ast_path"] = self.ast_path
+        if self.parent_id:
+            props["parent_id"] = self.parent_id
+        if self.embedding:
+            props["embedding"] = self.embedding
+
+        # Handle datetime fields
         if self.date_modified:
             props["date_modified"] = self.date_modified.isoformat()
-        if self.type:
-            props["type"] = self.type
-        if self.status:
-            props["status"] = self.status
 
         # Add metadata as individual properties
         for key, value in self.metadata.items():
@@ -138,6 +198,17 @@ class ArticleNode:
     content_uri: Optional[str] = None
     section: Optional[str] = None
     chapter: Optional[str] = None
+
+    # AST properties
+    ast_path: Optional[str] = None  # "/law_101/art_10"
+    ast_level: int = 6  # Article is level 6
+    parent_id: Optional[str] = None  # Law ID
+    position: Optional[int] = None  # Order within law
+
+    # RAG properties
+    content_full: Optional[str] = None  # Full article text
+    embedding: Optional[List[float]] = None  # For RAG
+
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_cypher_properties(self) -> Dict[str, Any]:
@@ -145,7 +216,8 @@ class ArticleNode:
         props = {
             "uri": self.uri,
             "law_uri": self.law_uri,
-            "number": self.number
+            "number": self.number,
+            "ast_level": self.ast_level
         }
 
         if self.title:
@@ -156,6 +228,76 @@ class ArticleNode:
             props["section"] = self.section
         if self.chapter:
             props["chapter"] = self.chapter
+        if self.ast_path:
+            props["ast_path"] = self.ast_path
+        if self.parent_id:
+            props["parent_id"] = self.parent_id
+        if self.position is not None:
+            props["position"] = self.position
+        if self.content_full:
+            props["content_full"] = self.content_full
+        if self.embedding:
+            props["embedding"] = self.embedding
+
+        # Add metadata
+        for key, value in self.metadata.items():
+            if key not in props:
+                props[key] = value
+
+        return props
+
+
+@dataclass
+class ActNode:
+    """
+    Represents an Act (OC/AS/RO publication) node in the graph
+    """
+    uri: str
+    type_document: str  # 'OC', 'AS', 'RO', 'FGA', 'FF', 'FogF'
+    number: Optional[str] = None  # Publication number
+
+    # Multilingual titles
+    title_de: Optional[str] = None
+    title_fr: Optional[str] = None
+    title_it: Optional[str] = None
+    title_rm: Optional[str] = None
+    title_en: Optional[str] = None
+
+    # Date fields
+    date_document: Optional[str] = None
+    date_publication: Optional[str] = None
+    date_entry_in_force: Optional[str] = None
+
+    # Legal references
+    amends: Optional[str] = None  # URI of law being amended
+    basic_act: Optional[str] = None  # URI of basic act
+
+    # Additional metadata
+    language: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_cypher_properties(self) -> Dict[str, Any]:
+        """Convert to properties for Cypher query"""
+        props = {
+            "uri": self.uri,
+            "type_document": self.type_document
+        }
+
+        # Add optional fields
+        optional_fields = [
+            'number', 'date_document', 'date_publication', 'date_entry_in_force',
+            'amends', 'basic_act', 'language'
+        ]
+
+        for field in optional_fields:
+            if hasattr(self, field) and getattr(self, field) is not None:
+                props[field] = getattr(self, field)
+
+        # Add multilingual titles
+        for lang in ["de", "fr", "it", "rm", "en"]:
+            title_attr = f"title_{lang}"
+            if hasattr(self, title_attr) and getattr(self, title_attr):
+                props[title_attr] = getattr(self, title_attr)
 
         # Add metadata
         for key, value in self.metadata.items():
@@ -288,6 +430,170 @@ class GraphSchema:
             queries.append((query, params))
 
         return queries
+
+
+@dataclass
+class TaxonomyNode:
+    """Base class for taxonomy hierarchy nodes"""
+    uri: str
+    name: str
+    number: Optional[str] = None
+    title_de: Optional[str] = None
+    title_fr: Optional[str] = None
+    title_it: Optional[str] = None
+    parent_uri: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_cypher_properties(self) -> Dict[str, Any]:
+        """Convert to properties for Cypher query"""
+        props = {
+            "uri": self.uri,
+            "name": self.name
+        }
+        if self.number:
+            props["number"] = self.number
+        for lang in ["de", "fr", "it"]:
+            title_attr = f"title_{lang}"
+            if hasattr(self, title_attr) and getattr(self, title_attr):
+                props[title_attr] = getattr(self, title_attr)
+        if self.parent_uri:
+            props["parent_uri"] = self.parent_uri
+        props.update(self.metadata)
+        return props
+
+
+@dataclass
+class DomainNode(TaxonomyNode):
+    """Represents a legal domain (top level of hierarchy)"""
+    pass
+
+
+@dataclass
+class BookNode(TaxonomyNode):
+    """Represents a book in the legal document"""
+    domain_uri: Optional[str] = None
+
+
+@dataclass
+class ChapterNode(TaxonomyNode):
+    """Represents a chapter in a book"""
+    book_uri: Optional[str] = None
+
+
+@dataclass
+class SectionNode(TaxonomyNode):
+    """Represents a section in a chapter"""
+    chapter_uri: Optional[str] = None
+
+
+@dataclass
+class ParagraphNode:
+    """
+    Represents a paragraph within an article (AST level 7)
+    """
+    uri: str
+    article_uri: str
+    number: str  # "1", "2", "3", etc.
+    text: str  # Full paragraph text
+
+    # AST properties
+    ast_path: Optional[str] = None  # "/law_101/art_10/para_1"
+    ast_level: int = 7
+    parent_id: Optional[str] = None  # Article ID
+    position: Optional[int] = None  # Order within article
+
+    # Content properties
+    word_count: Optional[int] = None
+    has_subpoints: bool = False
+    embedding: Optional[List[float]] = None  # For RAG
+
+    # Metadata
+    language: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_cypher_properties(self) -> Dict[str, Any]:
+        """Convert to properties for Cypher query"""
+        props = {
+            "uri": self.uri,
+            "article_uri": self.article_uri,
+            "number": self.number,
+            "text": self.text,
+            "ast_level": self.ast_level,
+            "has_subpoints": self.has_subpoints
+        }
+
+        if self.ast_path:
+            props["ast_path"] = self.ast_path
+        if self.parent_id:
+            props["parent_id"] = self.parent_id
+        if self.position is not None:
+            props["position"] = self.position
+        if self.word_count:
+            props["word_count"] = self.word_count
+        if self.embedding:
+            props["embedding"] = self.embedding
+        if self.language:
+            props["language"] = self.language
+
+        # Add metadata
+        for key, value in self.metadata.items():
+            if key not in props:
+                props[key] = value
+
+        return props
+
+
+@dataclass
+class SubpointNode:
+    """
+    Represents a lettered subpoint within a paragraph (AST level 8)
+    """
+    uri: str
+    paragraph_uri: str
+    letter: str  # "a", "b", "c", etc.
+    text: str  # Subpoint text
+
+    # AST properties
+    ast_path: Optional[str] = None  # "/law_101/art_10/para_1/subpoint_a"
+    ast_level: int = 8
+    parent_id: Optional[str] = None  # Paragraph ID
+    position: Optional[int] = None  # Order within paragraph
+
+    # Content properties
+    embedding: Optional[List[float]] = None  # For RAG
+
+    # Metadata
+    language: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_cypher_properties(self) -> Dict[str, Any]:
+        """Convert to properties for Cypher query"""
+        props = {
+            "uri": self.uri,
+            "paragraph_uri": self.paragraph_uri,
+            "letter": self.letter,
+            "text": self.text,
+            "ast_level": self.ast_level
+        }
+
+        if self.ast_path:
+            props["ast_path"] = self.ast_path
+        if self.parent_id:
+            props["parent_id"] = self.parent_id
+        if self.position is not None:
+            props["position"] = self.position
+        if self.embedding:
+            props["embedding"] = self.embedding
+        if self.language:
+            props["language"] = self.language
+
+        # Add metadata
+        for key, value in self.metadata.items():
+            if key not in props:
+                props[key] = value
+
+        return props
+
 
     @classmethod
     def validate_node_label(cls, label: str) -> bool:

@@ -14,6 +14,7 @@ from .reference_patterns import ReferencePatternDetector, LawCodeMapper
 from .reference_cache import ReferenceCache
 from .taxonomy_extractor import TaxonomyExtractor
 from .article_extractor import ArticleExtractor, Article, ArticleContent, Paragraph, Subpoint
+from .extracted_content import ExtractedContent
 
 __all__ = [
     'RelationshipExtractor',
@@ -35,5 +36,6 @@ __all__ = [
     'Article',
     'ArticleContent',
     'Paragraph',
-    'Subpoint'
+    'Subpoint',
+    'ExtractedContent'
 ]

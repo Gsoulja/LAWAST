@@ -8,7 +8,8 @@ from datetime import datetime
 from .neo4j_connection import Neo4jConnectionManager, get_connection
 from .graph_schema import (
     NodeLabels, RelationshipTypes,
-    LawNode, VersionNode, ArticleNode, LanguageNode, ManifestationNode
+    LawNode, VersionNode, ActNode, ArticleNode, LanguageNode, ManifestationNode,
+    DomainNode, BookNode, ChapterNode, SectionNode, ParagraphNode, SubpointNode
 )
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,31 @@ class GraphBuilder:
             return result[0]['v']
         return {}
 
+    def create_act_node(self, act: 'ActNode') -> Dict[str, Any]:
+        """
+        Create or update an Act node
+
+        Args:
+            act: ActNode instance
+
+        Returns:
+            Created/updated node properties
+        """
+        from .graph_schema import NodeLabels
+
+        query = f"""
+        MERGE (a:{NodeLabels.ACT.value} {{uri: $uri}})
+        SET a += $properties
+        RETURN a
+        """
+        params = {"uri": act.uri, "properties": act.to_cypher_properties()}
+        result = self.connection.execute_write(query, params)
+
+        if result:
+            logger.info(f"Created/updated Act node: {act.uri}")
+            return result[0]['a']
+        return {}
+
     def create_article_node(self, article: ArticleNode) -> Dict[str, Any]:
         """
         Create or update an Article node
@@ -120,6 +146,144 @@ class GraphBuilder:
         if result:
             logger.info(f"Created/updated Manifestation node: {manifestation.uri}")
             return result[0]['m']
+        return {}
+
+    def create_domain_node(self, domain: DomainNode) -> Dict[str, Any]:
+        """
+        Create or update a Domain node
+
+        Args:
+            domain: DomainNode instance
+
+        Returns:
+            Created/updated node properties
+        """
+        query = f"""
+        MERGE (d:{NodeLabels.DOMAIN.value} {{uri: $uri}})
+        SET d += $properties
+        RETURN d
+        """
+        params = {"uri": domain.uri, "properties": domain.to_cypher_properties()}
+        result = self.connection.execute_write(query, params)
+
+        if result:
+            logger.info(f"Created/updated Domain node: {domain.uri}")
+            return result[0]['d']
+        return {}
+
+    def create_book_node(self, book: BookNode) -> Dict[str, Any]:
+        """
+        Create or update a Book node
+
+        Args:
+            book: BookNode instance
+
+        Returns:
+            Created/updated node properties
+        """
+        query = f"""
+        MERGE (b:{NodeLabels.BOOK.value} {{uri: $uri}})
+        SET b += $properties
+        RETURN b
+        """
+        params = {"uri": book.uri, "properties": book.to_cypher_properties()}
+        result = self.connection.execute_write(query, params)
+
+        if result:
+            logger.info(f"Created/updated Book node: {book.uri}")
+            return result[0]['b']
+        return {}
+
+    def create_chapter_node(self, chapter: ChapterNode) -> Dict[str, Any]:
+        """
+        Create or update a Chapter node
+
+        Args:
+            chapter: ChapterNode instance
+
+        Returns:
+            Created/updated node properties
+        """
+        query = f"""
+        MERGE (c:{NodeLabels.CHAPTER.value} {{uri: $uri}})
+        SET c += $properties
+        RETURN c
+        """
+        params = {"uri": chapter.uri, "properties": chapter.to_cypher_properties()}
+        result = self.connection.execute_write(query, params)
+
+        if result:
+            logger.info(f"Created/updated Chapter node: {chapter.uri}")
+            return result[0]['c']
+        return {}
+
+    def create_section_node(self, section: SectionNode) -> Dict[str, Any]:
+        """
+        Create or update a Section node
+
+        Args:
+            section: SectionNode instance
+
+        Returns:
+            Created/updated node properties
+        """
+        query = f"""
+        MERGE (s:{NodeLabels.SECTION.value} {{uri: $uri}})
+        SET s += $properties
+        RETURN s
+        """
+        params = {"uri": section.uri, "properties": section.to_cypher_properties()}
+        result = self.connection.execute_write(query, params)
+
+        if result:
+            logger.info(f"Created/updated Section node: {section.uri}")
+            return result[0]['s']
+        return {}
+
+    def create_paragraph_node(self, paragraph: 'ParagraphNode') -> Dict[str, Any]:
+        """
+        Create or update a Paragraph node
+
+        Args:
+            paragraph: ParagraphNode instance
+
+        Returns:
+            Created/updated node properties
+        """
+        query = f"""
+        MERGE (p:{NodeLabels.PARAGRAPH.value} {{uri: $uri}})
+        SET p += $properties
+        RETURN p
+        """
+        params = {"uri": paragraph.uri, "properties": paragraph.to_cypher_properties()}
+        result = self.connection.execute_write(query, params)
+
+        if result:
+            logger.debug(f"Created/updated Paragraph node: {paragraph.uri}")
+            return result[0]['p']
+        return {}
+
+    def create_subpoint_node(self, subpoint: 'SubpointNode') -> Dict[str, Any]:
+        """
+        Create or update a Subpoint node
+
+        Args:
+            subpoint: SubpointNode instance
+
+        Returns:
+            Created/updated node properties
+        """
+        query = f"""
+        MERGE (s:{NodeLabels.SUBPOINT.value} {{uri: $uri}})
+        SET s += $properties
+        RETURN s
+        """
+        params = {"uri": subpoint.uri, "properties": subpoint.to_cypher_properties()}
+        result = self.connection.execute_write(query, params)
+
+        if result:
+            logger.debug(f"Created/updated Subpoint node: {subpoint.uri}")
+            return result[0]['s']
         return {}
 
     # ============= Batch Node Creation =============
@@ -257,6 +421,21 @@ class GraphBuilder:
     def create_amends(self, amending_law_uri: str, amended_law_uri: str) -> bool:
         """Create AMENDS relationship between laws"""
         return self.create_relationship(amending_law_uri, amended_law_uri, "AMENDS")
+
+    def create_has_paragraph(self, article_uri: str, paragraph_uri: str, position: Optional[int] = None) -> bool:
+        """Create HAS_PARAGRAPH relationship between Article and Paragraph"""
+        props = {"position": position} if position is not None else None
+        return self.create_relationship(article_uri, paragraph_uri, "HAS_PARAGRAPH", props)
+
+    def create_has_subpoint(self, paragraph_uri: str, subpoint_uri: str, position: Optional[int] = None) -> bool:
+        """Create HAS_SUBPOINT relationship between Paragraph and Subpoint"""
+        props = {"position": position} if position is not None else None
+        return self.create_relationship(paragraph_uri, subpoint_uri, "HAS_SUBPOINT", props)
+
+    def create_has_child(self, parent_uri: str, child_uri: str, position: Optional[int] = None) -> bool:
+        """Create HAS_CHILD relationship for AST hierarchy"""
+        props = {"position": position} if position is not None else None
+        return self.create_relationship(parent_uri, child_uri, "HAS_CHILD", props)
 
     # ============= Batch Relationship Creation =============
 
