@@ -1,11 +1,13 @@
 # TASK-013: Main Query Pipeline Integration
 
-**Status**: BACKLOG
+**Status**: IN-PROGRESS
 **Priority**: HIGH
 **Type**: feature
-**Assigned**: Unassigned
+**Assigned**: AI Assistant
 **Created**: 2025-09-25
-**Updated**: 2025-09-25
+**Updated**: 2025-09-26
+**Started**: 2025-09-26
+**Analysis Completed**: 2025-09-26
 **Estimated Effort**: 2-3 days
 **Parent**: TASK-009
 
@@ -218,3 +220,152 @@ Confidence: 95%
 - Monitor each stage separately for performance tuning
 - CLI should be the primary interface initially
 - REST API can be added later for web integration
+
+## Technical Analysis (Auto-generated 2025-09-26)
+
+### Existing Resources Found
+- **Components**:
+  - `IntelligentAgent` (src/context/agent.py) - Fully functional orchestrator with query analysis
+  - `TripleRAG` (src/retrieval/triple_rag.py) - Complete parallel RAG implementation
+  - `ReasoningEngine` (src/reasoning/engine.py) - Legal reasoning with citations
+  - `ApertusClient` (src/articulation/apertus_client.py) - Swiss AI natural language generation
+  - Session management (src/context/session_manager.py)
+  - Context tree for multi-turn dialogue (src/context/context_tree.py)
+  - Query analyzer (src/context/query_analyzer.py)
+  - Strategy planner (src/context/strategy_planner.py)
+  - Chain of thought reasoning (src/reasoning/chain_of_thought.py)
+  - Citation tracker (src/reasoning/citation_tracker.py)
+  - Confidence scorer (src/reasoning/confidence_scorer.py)
+
+- **Services**:
+  - Neo4j graph database integration (src/data_access/)
+  - Storage pipeline (src/data_access/storage_pipeline.py)
+  - Embedding generation capabilities
+
+- **APIs**:
+  - No existing REST/GraphQL endpoints found
+  - Basic CLI stub exists (src/interfaces/cli/main.py)
+
+- **Database**:
+  - Neo4j with vector search capabilities
+  - Document storage with embeddings
+  - Legal taxonomy and relationships
+
+- **Utilities**:
+  - HTML parsers (src/parsers/)
+  - Legal extractors (src/extractors/)
+  - Classification system
+
+### Dependencies Required
+- **Frontend packages**: N/A (CLI/API only)
+- **Backend packages**:
+  - fastapi>=0.104.0 (enabled in requirements.txt)
+  - uvicorn>=0.24.0 (enabled in requirements.txt)
+  - pydantic>=2.0.0 (enabled in requirements.txt)
+  - httpx (for async HTTP - to be added)
+  - python-multipart (for file uploads - to be added)
+- **Database migrations**: None required (using existing Neo4j schema)
+- **Docker services**: Neo4j (already configured)
+
+### Impact Assessment
+#### Files to Create (New)
+- `src/pipeline/query_pipeline.py`: Main orchestrator class
+- `src/pipeline/execution_flow.py`: Stage-by-stage execution logic
+- `src/pipeline/error_handler.py`: Graceful degradation
+- `src/pipeline/performance_monitor.py`: Metrics tracking
+- `src/interfaces/api/app.py`: FastAPI application
+- `src/interfaces/api/models.py`: Pydantic request/response models
+- `src/interfaces/api/endpoints.py`: REST endpoints
+- `src/interfaces/openwebui/lawast_pipeline.py`: OpenWebUI Pipeline integration
+
+#### Files to Modify
+- `src/interfaces/cli/main.py`: Implement actual CLI using pipeline
+- `requirements.txt`: Add httpx, python-multipart
+
+#### Components Affected
+- IntelligentAgent: LOW (just needs async wrapper)
+- TripleRAG: LOW (already has async support)
+- ReasoningEngine: LOW (needs async wrapper)
+- ApertusClient: LOW (already async-ready)
+
+#### API Changes
+- NEW `/v1/chat/completions`: OpenAI-compatible endpoint
+- NEW `/v1/query`: Direct query endpoint
+- NEW `/v1/sessions`: Session management
+- NEW `/health`: Health check endpoint
+
+#### Database Changes
+- None required (using existing schema)
+
+### OpenWebUI Integration Options
+
+#### Option 1: Pipeline Module (Recommended)
+- **Pros**: Native integration, no separate service, simpler deployment
+- **Cons**: Requires OpenWebUI pipeline loader setup
+- **Implementation**: Create Pipeline class following OpenWebUI format
+
+#### Option 2: REST API with OpenAI Format
+- **Pros**: Universal compatibility, standalone service, testable
+- **Cons**: Requires service management, additional deployment step
+- **Implementation**: FastAPI with OpenAI-compatible endpoints
+
+### Implementation Checklist
+Based on CLAUDE.md principles:
+- [x] Reuse existing IntelligentAgent instead of creating new orchestrator
+- [x] Extend existing components rather than duplicate
+- [ ] Create async wrappers for synchronous operations
+- [ ] Implement Pipeline class for OpenWebUI
+- [ ] Add FastAPI endpoints for REST option
+- [ ] Follow SOLID principles in pipeline design
+- [ ] Maintain backwards compatibility
+- [ ] Add proper error handling at each stage
+- [ ] Include loading states for long operations
+- [ ] Write self-documenting code
+- [ ] Add comprehensive logging with trace IDs
+- [ ] Implement graceful degradation
+- [ ] Add performance monitoring
+
+### Risk Analysis
+- **Risk Level**: MEDIUM
+- **Main Risks**:
+  - **Async/Sync mismatch**: Some components are sync-only. **Mitigation**: Use asyncio.run_in_executor for sync operations
+  - **OpenWebUI version compatibility**: Pipeline format may change. **Mitigation**: Test with multiple OpenWebUI versions, document version requirements
+  - **Performance bottlenecks**: Neo4j queries may be slow. **Mitigation**: Implement caching, connection pooling, query optimization
+  - **Error cascading**: One component failure breaks pipeline. **Mitigation**: Implement graceful degradation at each stage
+  - **Session state management**: Multi-turn dialogue complexity. **Mitigation**: Use existing SessionManager, implement cleanup strategies
+
+### Estimated Effort
+- Original: 2-3 days
+- Adjusted: 3-5 days
+- Reason: Need to implement both Pipeline and REST API options for maximum flexibility, plus async wrappers
+
+### Implementation Strategy
+
+1. **Phase 1: Core Pipeline (Day 1)**
+   - Create QueryPipeline orchestrator
+   - Wire existing components together
+   - Add async wrappers where needed
+   - Implement basic error handling
+
+2. **Phase 2: OpenWebUI Pipeline (Day 2)**
+   - Create Pipeline class following OpenWebUI format
+   - Test with OpenWebUI pipeline loader
+   - Add response formatting for OpenWebUI
+
+3. **Phase 3: REST API (Day 2-3)**
+   - Implement FastAPI application
+   - Add OpenAI-compatible endpoints
+   - Create Pydantic models
+   - Add API documentation
+
+4. **Phase 4: Testing & Polish (Day 3-4)**
+   - Integration tests
+   - Performance optimization
+   - Documentation
+   - Error handling refinement
+
+5. **Phase 5: Deployment Guide (Day 4-5)**
+   - Docker configuration
+   - Environment setup guide
+   - OpenWebUI integration instructions
+   - API usage examples
