@@ -6,7 +6,7 @@ Test Apertus using conversational API
 from huggingface_hub import InferenceClient
 import os
 
-api_key = "***REMOVED***"
+api_key = os.getenv("HUGGINGFACE_API_KEY")
 
 # Initialize client
 client = InferenceClient(token=api_key)

@@ -6,7 +6,7 @@ Test different endpoint configurations
 from huggingface_hub import InferenceClient
 import os
 
-api_key = "***REMOVED***"
+api_key = os.getenv("HUGGINGFACE_API_KEY")
 
 # Test different endpoint variations
 endpoints = [

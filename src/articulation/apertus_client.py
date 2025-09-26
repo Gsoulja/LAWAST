@@ -20,7 +20,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 console = Console()
 
 # Configuration
-API_KEY = os.getenv("HUGGINGFACE_API_KEY", "***REMOVED***")
+API_KEY = os.getenv("HUGGINGFACE_API_KEY")
 MODEL = "swiss-ai/Apertus-8B-Instruct-2509"
 DEFAULT_MAX_TOKENS = 512
 DEFAULT_TEMPERATURE = 0.7
