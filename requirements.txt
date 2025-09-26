@@ -31,9 +31,13 @@ pytest-mock>=3.11.0
 sentence-transformers>=2.2.2  # Enabled for TASK-010: Triple RAG
 # langchain>=0.1.0
 # qdrant-client>=1.7.0
-# fastapi>=0.104.0
-# uvicorn>=0.24.0
-# pydantic>=2.0.0
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.0.0
 # pyyaml>=6.0
 numpy>=1.24.0  # Enabled for TASK-010: Triple RAG
 # tqdm>=4.66.0  # Not needed - using rich instead
+
+# Pipeline and API dependencies (TASK-013)
+httpx>=0.24.0  # Async HTTP client
+python-multipart>=0.0.6  # File upload support for FastAPI
