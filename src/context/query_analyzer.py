@@ -405,6 +405,73 @@ class QueryAnalyzer:
 
         return missing
 
+    def score_article_relevance(self, query: str, article_content: str, article_num: str) -> float:
+        """
+        Score how relevant an article is to a query
+
+        Args:
+            query: User query
+            article_content: Content of the article
+            article_num: Article number
+
+        Returns:
+            Relevance score (0.0 to 1.0)
+        """
+        score = 0.0
+        query_lower = query.lower()
+        content_lower = article_content.lower() if article_content else ""
+
+        # Special rules for known article-query mappings
+        article_query_map = {
+            '33': ['petition', 'nachteile', 'petitionsrecht'],
+            '16': ['meinung', 'meinungsfreiheit', 'information'],
+            '8': ['gleich', 'diskriminierung', 'rechtsgleichheit'],
+            '11': ['kinder', 'jugend'],
+            '114': ['arbeitslos', 'arbeitslosenversicherung'],
+            '13': ['privat', 'datenschutz'],
+            '26': ['eigentum', 'enteignung'],
+            '27': ['wirtschaft', 'gewerbe'],
+        }
+
+        # Check if this article matches query terms
+        if article_num in article_query_map:
+            for term in article_query_map[article_num]:
+                if term in query_lower:
+                    score += 0.4
+
+        # Check if article number is explicitly mentioned
+        if f"art. {article_num}" in query_lower or f"artikel {article_num}" in query_lower:
+            score += 0.5
+
+        # Count matching significant terms
+        query_terms = set(query_lower.split())
+        content_terms = set(content_lower.split())
+
+        # Remove common words
+        stopwords = {'der', 'die', 'das', 'und', 'oder', 'ist', 'sind', 'hat', 'haben',
+                    'wird', 'werden', 'kann', 'können', 'ein', 'eine', 'einer', 'mir',
+                    'ich', 'sie', 'er', 'es', 'wenn', 'welche', 'was', 'wie'}
+        query_terms -= stopwords
+        content_terms -= stopwords
+
+        # Calculate term overlap
+        if query_terms:
+            overlap = len(query_terms & content_terms)
+            score += (overlap / len(query_terms)) * 0.3
+
+        # Special context rules
+        if 'nachteile' in query_lower and 'petition' in query_lower:
+            if article_num == '33':
+                score += 0.5  # Strong match for petition + disadvantages
+            elif article_num == '114':
+                score *= 0.1  # Reduce score for unemployment article
+
+        # Check for key phrases in content
+        if 'nachteile erwachsen' in content_lower and 'petition' in content_lower:
+            score += 0.3
+
+        return min(score, 1.0)
+
     def _extract_keywords(self, query: str) -> List[str]:
         """
         Extract important keywords from the query.

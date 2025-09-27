@@ -20,23 +20,100 @@ class LegalRuleType(Enum):
 @dataclass
 class Citation:
     """Represents a legal citation"""
-    sr_number: str
+    sr_number: Optional[str] = None
     article: Optional[str] = None
     paragraph: Optional[str] = None
     subpoint: Optional[str] = None
     ast_path: Optional[str] = None
     title: Optional[str] = None
+    source: Optional[str] = None  # Raw source reference
+    reference: Optional[str] = None  # Formatted reference
+    relevance: Optional[float] = None  # Relevance score
+    law_abbreviation: Optional[str] = None  # Cached law abbreviation (BV, OR, DSG, etc.)
 
     def __str__(self) -> str:
         """Format citation as string"""
-        parts = [f"SR {self.sr_number}"]
+        # Use formatted reference if available
+        if self.reference:
+            return self.reference
+
+        # Use source if available and looks like a citation with law abbreviation
+        if self.source and ("Art." in self.source or "SR" in self.source):
+            # Check if source already contains law abbreviation
+            if any(abbrev in self.source for abbrev in ["BV", "OR", "DSG", "ZGB", "StGB"]):
+                return self.source
+
+        # Build from components with law abbreviation
         if self.article:
-            parts.append(f"Art. {self.article}")
-        if self.paragraph:
-            parts.append(f"Para. {self.paragraph}")
-        if self.subpoint:
-            parts.append(f"lit. {self.subpoint}")
-        return " ".join(parts)
+            # Use law abbreviation if available
+            if self.law_abbreviation:
+                if self.paragraph:
+                    return f"Art. {self.article} Abs. {self.paragraph} {self.law_abbreviation}"
+                else:
+                    return f"Art. {self.article} {self.law_abbreviation}"
+
+            # Try to get law abbreviation from SR number
+            elif self.sr_number:
+                # Import here to avoid circular dependency
+                from ..reasoning.citation_tracker import CitationTracker
+                tracker = CitationTracker()
+                law_abbrev = tracker.get_law_abbreviation(self.sr_number)
+                if law_abbrev:
+                    if self.paragraph:
+                        return f"Art. {self.article} Abs. {self.paragraph} {law_abbrev}"
+                    else:
+                        return f"Art. {self.article} {law_abbrev}"
+
+        # Build from SR number if no law abbreviation found
+        if self.sr_number:
+            parts = [f"SR {self.sr_number}"]
+            if self.article:
+                parts.append(f"Art. {self.article}")
+            if self.paragraph:
+                parts.append(f"Para. {self.paragraph}")
+            if self.subpoint:
+                parts.append(f"lit. {self.subpoint}")
+            return " ".join(parts)
+
+        # Use article alone if no SR number or law abbreviation
+        if self.article:
+            # Always default to BV for articles (since we're processing BV)
+            return f"Art. {self.article} BV"
+
+        # Use title as fallback
+        if self.title:
+            return self.title
+
+        # Last resort - use source
+        if self.source:
+            return self.source
+
+        return "Unknown citation"
+
+    def format_for_challenge(self) -> str:
+        """Format citation for Swiss Law RAG Challenge compliance"""
+        # If we have a law abbreviation cached, use it
+        if self.law_abbreviation and self.article:
+            if self.paragraph:
+                return f"Art. {self.article} Abs. {self.paragraph} {self.law_abbreviation}"
+            else:
+                return f"Art. {self.article} {self.law_abbreviation}"
+
+        # Try to extract from SR number if available
+        if self.sr_number and self.article:
+            # Import here to avoid circular dependency
+            from ..reasoning.citation_tracker import CitationTracker
+            tracker = CitationTracker()
+            law_abbrev = tracker.get_law_abbreviation(self.sr_number)
+            if law_abbrev:
+                self.law_abbreviation = law_abbrev  # Cache it
+                if self.paragraph:
+                    return f"Art. {self.article} Abs. {self.paragraph} {law_abbrev}"
+                else:
+                    return f"Art. {self.article} {law_abbrev}"
+
+        # Fallback to standard format
+        return str(self)
 
 
 @dataclass

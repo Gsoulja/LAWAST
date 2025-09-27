@@ -1,5 +1,31 @@
 """
 Graph schema definitions for the LAWAST Neo4j database
+
+Hierarchical Structure:
+=======================
+Law (language-neutral, e.g., SR 101)
+  ├─[:HAS_VERSION]→ Version (temporal tracking, e.g., 2024-01-01)
+  │   ├─[:HAS_LANGUAGE]→ LawLanguageVariant (DE)
+  │   │   ├─[:HAS_ARTICLE]→ Article (Art. 1 in German)
+  │   │   │   ├─[:HAS_PARAGRAPH]→ Paragraph (Para 1 in German)
+  │   │   │   │   └─[:HAS_SUBPOINT]→ Subpoint (a. in German)
+  │   │   │   └─[:HAS_PARAGRAPH]→ Paragraph (Para 2 in German)
+  │   │   └─[:HAS_ARTICLE]→ Article (Art. 2 in German)
+  │   ├─[:HAS_LANGUAGE]→ LawLanguageVariant (FR)
+  │   │   ├─[:HAS_ARTICLE]→ Article (Art. 1 in French)
+  │   │   │   └─[:HAS_PARAGRAPH]→ Paragraph (Para 1 in French)
+  │   │   └─[:HAS_ARTICLE]→ Article (Art. 2 in French)
+  │   ├─[:HAS_LANGUAGE]→ LawLanguageVariant (IT)
+  │   ├─[:HAS_LANGUAGE]→ LawLanguageVariant (RM)
+  │   └─[:HAS_LANGUAGE]→ LawLanguageVariant (EN)
+  └─[:HAS_VERSION]→ Version (another version, e.g., 2025-01-01)
+
+This structure allows for:
+- Complete language separation while maintaining relationships
+- Temporal versioning of laws
+- Language-specific content (titles, articles, paragraphs)
+- Efficient querying by language, version, or both
+- Proper AST hierarchical relationships
 """
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -11,6 +37,7 @@ class NodeLabels(Enum):
     """Node type labels in the graph"""
     LAW = "Law"
     VERSION = "Version"
+    LAW_LANGUAGE_VARIANT = "LawLanguageVariant"
     ACT = "Act"
     ARTICLE = "Article"
     PARAGRAPH = "Paragraph"
@@ -26,6 +53,7 @@ class NodeLabels(Enum):
 class RelationshipTypes(Enum):
     """Relationship types in the graph"""
     HAS_VERSION = "HAS_VERSION"
+    HAS_LANGUAGE = "HAS_LANGUAGE"  # Version -> LawLanguageVariant
     SUPERSEDES = "SUPERSEDES"
     EXPRESSED_IN = "EXPRESSED_IN"
     MANIFESTED_AS = "MANIFESTED_AS"
@@ -187,22 +215,97 @@ class VersionNode:
 
 
 @dataclass
+class LawLanguageVariant:
+    """
+    Represents a language-specific variant of a law under a specific version.
+    This allows for complete language separation while maintaining version tracking.
+
+    Hierarchy: Law -> Version -> LawLanguageVariant -> Article -> Paragraph
+    """
+    uri: str  # Format: {law_uri}/version/{date}/{language}
+    law_uri: str  # Reference to parent Law
+    version_uri: str  # Reference to parent Version
+    language: str  # Language code: de, fr, it, rm, en
+
+    # Language-specific content
+    title: str  # Title in this language
+    abbreviation: Optional[str] = None  # Abbreviation in this language
+
+    # Metadata from the law (inherited)
+    sr_number: Optional[str] = None
+    in_force: bool = True
+    status: str = 'in_force'  # in_force, repealed, pending
+
+    # Legal references (same for all languages)
+    basic_act: Optional[str] = None
+    classified_by_taxonomy: Optional[str] = None
+    type_document: Optional[str] = None
+
+    # AST properties
+    ast_path: Optional[str] = None  # e.g., "/sr_101/de"
+    ast_level: int = 5
+
+    # Timestamps
+    date_modified: Optional[str] = None
+
+    # Additional metadata
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_cypher_properties(self) -> Dict[str, Any]:
+        """Convert to properties for Cypher query"""
+        props = {
+            "uri": self.uri,
+            "law_uri": self.law_uri,
+            "version_uri": self.version_uri,
+            "language": self.language,
+            "title": self.title,
+            "in_force": self.in_force,
+            "status": self.status,
+            "ast_level": self.ast_level,
+            "type": "LawLanguageVariant"
+        }
+
+        # Add optional fields
+        optional_fields = [
+            'abbreviation', 'sr_number', 'basic_act',
+            'classified_by_taxonomy', 'type_document',
+            'ast_path', 'date_modified'
+        ]
+
+        for field in optional_fields:
+            if hasattr(self, field) and getattr(self, field) is not None:
+                props[field] = getattr(self, field)
+
+        # Add metadata
+        for key, value in self.metadata.items():
+            if key not in props:
+                props[key] = value
+
+        return props
+
+
+@dataclass
 class ArticleNode:
     """
-    Represents an Article node in the graph
+    Represents an Article node in the graph.
+    Articles belong to a LawLanguageVariant, not directly to Law.
+    Hierarchy: Law -> Version -> LawLanguageVariant -> Article
     """
-    uri: str
-    law_uri: str
+    uri: str  # Format: {law_language_variant_uri}/art_{number}
+    law_language_variant_uri: str  # Reference to parent LawLanguageVariant
+    law_uri: str  # Reference to Law (for convenience)
+    language: str  # Language code inherited from parent
     number: str  # Can be like "1", "1a", "335b"
+    number_normalized: Optional[int] = None  # For sorting
     title: Optional[str] = None
     content_uri: Optional[str] = None
     section: Optional[str] = None
     chapter: Optional[str] = None
 
     # AST properties
-    ast_path: Optional[str] = None  # "/law_101/art_10"
+    ast_path: Optional[str] = None  # e.g., "/sr_101/de/art_10"
     ast_level: int = 6  # Article is level 6
-    parent_id: Optional[str] = None  # Law ID
+    parent_id: Optional[str] = None  # LawLanguageVariant ID
     position: Optional[int] = None  # Order within law
 
     # RAG properties

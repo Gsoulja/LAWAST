@@ -54,3 +54,9 @@ desktop.ini
 *.log
 checkpoint.json
 processing_checkpoint.json
+# Sensitive files - DO NOT COMMIT
+.webui_secret_key
+passwords.txt
+sessions/
+*.key
+*.secret

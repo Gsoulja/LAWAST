@@ -16,6 +16,7 @@ from .chain_of_thought import ChainOfThoughtGenerator
 from .validator import ConsistencyValidator
 from .citation_tracker import CitationTracker
 from .confidence_scorer import ConfidenceScorer
+from ..context.query_analyzer import QueryAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -29,27 +30,33 @@ class ReasoningEngine:
 
     def __init__(self,
                  apertus_client: Optional[ApertusChatClient] = None,
-                 config: Optional[Dict[str, Any]] = None):
+                 config: Optional[Dict[str, Any]] = None,
+                 neo4j_connection = None):
         """
         Initialize the reasoning engine.
 
         Args:
             apertus_client: Apertus LLM client
             config: Optional configuration dictionary
+            neo4j_connection: Optional Neo4j connection for graph lookups
         """
         # Initialize components
         self.synthesizer = ResultSynthesizer()
         self.legal_logic = LegalLogicEngine()
         self.cot_generator = ChainOfThoughtGenerator(apertus_client)
         self.validator = ConsistencyValidator()
-        self.citation_tracker = CitationTracker()
+        self.citation_tracker = CitationTracker(neo4j_connection=neo4j_connection)
         self.confidence_scorer = ConfidenceScorer()
 
         # Configuration
         self.config = config or {}
-        self.enable_llm_reasoning = self.config.get("enable_llm_reasoning", True)
+        # Use rule-based reasoning for consistency
+        self.enable_llm_reasoning = self.config.get("enable_llm_reasoning", False)
         self.max_reasoning_steps = self.config.get("max_reasoning_steps", 10)
         self.min_confidence_threshold = self.config.get("min_confidence_threshold", 0.3)
+
+        # Initialize query analyzer
+        self.query_analyzer = QueryAnalyzer()
 
         logger.info("Reasoning engine initialized")
 
@@ -108,15 +115,21 @@ class ReasoningEngine:
                 reasoning_steps=reasoning_steps
             )
 
-            # Step 5: Track citations
-            logger.debug("Step 5: Tracking citations")
+            # Step 5: Generate preliminary answer (for citation filtering)
+            logger.debug("Step 5: Generating preliminary answer")
+            # Get preliminary answer from reasoning steps
+            preliminary_answer = reasoning_steps[-1].conclusion if reasoning_steps else ""
+
+            # Step 6: Track citations (with answer context for filtering)
+            logger.debug("Step 6: Tracking citations")
             citations = self.citation_tracker.track_citations(
                 reasoning_steps=reasoning_steps,
-                evidence=synthesis_result.unified_facts
+                evidence=synthesis_result.unified_facts,
+                answer_text=preliminary_answer
             )
 
-            # Step 6: Calculate confidence score
-            logger.debug("Step 6: Calculating confidence")
+            # Step 7: Calculate confidence score
+            logger.debug("Step 7: Calculating confidence")
             confidence_score, confidence_factors = self.confidence_scorer.calculate_confidence(
                 reasoning_steps=reasoning_steps,
                 evidence=synthesis_result.unified_facts,
@@ -125,8 +138,8 @@ class ReasoningEngine:
                 contradictions=synthesis_result.contradictions
             )
 
-            # Step 7: Generate final answer
-            logger.debug("Step 7: Generating final answer")
+            # Step 8: Generate final answer
+            logger.debug("Step 8: Generating final answer")
             final_answer = self._generate_final_answer(
                 reasoning_steps=reasoning_steps,
                 legal_rules=legal_rules,
@@ -233,11 +246,103 @@ class ReasoningEngine:
                 confidence=0.7
             ))
 
-        # Step 5: Final conclusion
+        # Step 5: Final conclusion - Generate answer dynamically from evidence
         step_number += 1
         if synthesis_result.unified_facts:
-            top_fact = synthesis_result.unified_facts[0]
-            conclusion = f"Based on {top_fact.get('uri', 'the evidence')}"
+            # Analyze query to determine relevant articles
+            query_analysis = self.query_analyzer.analyze(query)
+            logger.info(f"Query analysis - intent: {query_analysis.intent.value}, complexity: {query_analysis.complexity.value}")
+
+            # Score and rank facts by relevance to query
+            scored_facts = []
+            for fact in synthesis_result.unified_facts:
+                content = fact.get('content', '')
+                title = fact.get('title', '')
+
+                # Extract article number from title if available
+                article_num = None
+                if title and 'Art.' in title:
+                    import re
+                    match = re.search(r'Art\.\s*(\d+)', title)
+                    if match:
+                        article_num = match.group(1)
+
+                # Score relevance
+                relevance_score = 0.0
+                if article_num:
+                    relevance_score = self.query_analyzer.score_article_relevance(
+                        query, content, article_num
+                    )
+                else:
+                    # Basic text similarity for non-article content
+                    query_terms = set(query.lower().split())
+                    content_terms = set(content.lower().split()) if content else set()
+                    if query_terms:
+                        relevance_score = len(query_terms & content_terms) / len(query_terms)
+
+                scored_facts.append((fact, relevance_score))
+
+            # Sort by relevance score
+            scored_facts.sort(key=lambda x: x[1], reverse=True)
+
+            # Log relevance scores for debugging
+            if scored_facts:
+                logger.info(f"Top 3 article relevance scores:")
+                for fact, score in scored_facts[:3]:
+                    title = fact.get('title', 'Unknown')
+                    logger.info(f"  {title}: {score:.3f}")
+
+            # Get top relevant facts
+            top_facts = [fact for fact, score in scored_facts[:3] if score > 0.1]
+
+            if top_facts:
+                # Extract and combine relevant content from evidence
+                answer_parts = []
+                article_refs = []
+
+                for fact in top_facts:
+                    content = fact.get('content', '')
+                    title = fact.get('title', '')
+
+                    # Add article reference if available
+                    if title and 'Art.' in title:
+                        article_refs.append(title)
+
+                    # Extract meaningful content (limit length for clarity)
+                    if content:
+                        # Take a reasonable portion of content
+                        content_excerpt = content[:400].strip()
+                        # Ensure we end at a sentence boundary if possible
+                        last_period = content_excerpt.rfind('.')
+                        if last_period > 200:
+                            content_excerpt = content_excerpt[:last_period + 1]
+
+                        answer_parts.append(content_excerpt)
+
+                # Build the conclusion from the evidence
+                if answer_parts:
+                    # Combine the evidence into a coherent answer
+                    if len(answer_parts) == 1:
+                        conclusion = answer_parts[0]
+                    else:
+                        # Multiple pieces of evidence - combine them
+                        conclusion = " ".join(answer_parts[:2])  # Use top 2 to avoid overly long answers
+
+                    # Add source reference if available
+                    if article_refs and article_refs[0]:
+                        if not conclusion.startswith(article_refs[0]):
+                            conclusion = f"According to {article_refs[0]}: {conclusion}"
+                else:
+                    # No content found in evidence
+                    conclusion = "Unable to extract sufficient information from the available evidence."
+
+                # Ensure answer is clean and complete
+                conclusion = conclusion.replace("  ", " ").strip()
+                if not conclusion.endswith('.'):
+                    conclusion += '.'
+
+            else:
+                conclusion = "No relevant evidence found to answer this question."
         else:
             conclusion = "Insufficient evidence for definitive answer"
 
@@ -256,11 +361,20 @@ class ReasoningEngine:
                               legal_rules: List[LegalRule],
                               citations: List[Citation],
                               confidence: float) -> str:
-        """Generate the final answer text"""
+        """Generate the final answer text with structured format"""
         # Get conclusion from last reasoning step
         if reasoning_steps:
             last_step = reasoning_steps[-1]
             base_answer = last_step.conclusion
+
+            # Remove evidence markers (E1, E2, etc.) from the answer
+            import re
+            # Pattern to match (E1), (E1, E2), etc.
+            base_answer = re.sub(r'\s*\([E]\d+(?:,\s*[E]\d+)*\)', '', base_answer)
+            # Also remove standalone E1, E2 references
+            base_answer = re.sub(r'\b[E]\d+\b', '', base_answer)
+            # Clean up any double spaces left behind
+            base_answer = re.sub(r'\s+', ' ', base_answer).strip()
         else:
             base_answer = "Unable to provide a definitive answer based on available evidence."
 
@@ -278,12 +392,58 @@ class ReasoningEngine:
         if confidence < 0.5:
             base_answer = f"{base_answer}\n\nNote: This answer has lower confidence due to limited or conflicting evidence."
 
-        # Add primary citation if available
-        if citations:
-            primary_citation = citations[0]
-            base_answer = f"{base_answer}\n\nPrimary Source: {primary_citation}"
+        # Format the structured response
+        formatted_answer = f"Answer: {base_answer}"
 
-        return base_answer
+        # Add citations in the required format
+        if citations:
+            # Format citations properly
+            citation_strings = []
+            for citation in citations[:10]:  # Check more citations to find articles
+                try:
+                    # First check if citation has article attribute
+                    if hasattr(citation, 'article') and citation.article:
+                        # Format as Art. X BV for Bundesverfassung
+                        if hasattr(citation, 'sr_number') and citation.sr_number == "101":
+                            citation_strings.append(f"Art. {citation.article} BV")
+                        else:
+                            citation_strings.append(f"Art. {citation.article}")
+                    else:
+                        citation_str = str(citation)
+                        # Skip paragraph text (usually starts with "Para" or is too long)
+                        if citation_str.startswith("Para") or len(citation_str) > 80:
+                            continue
+                        # Skip if citation string is invalid
+                        if not citation_str or citation_str == "Unknown citation":
+                            continue
+                        # Only add if it looks like an article reference
+                        if "Art." in citation_str:
+                            citation_strings.append(citation_str)
+                except Exception as e:
+                    logger.debug(f"Error formatting citation: {e}")
+                    continue
+
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_citations = []
+            for c in citation_strings[:5]:  # Limit to 5 unique citations
+                if c and c not in seen:  # Check c is not None
+                    seen.add(c)
+                    unique_citations.append(c)
+
+            if unique_citations:
+                # Filter out any None values before joining
+                valid_citations = [c for c in unique_citations if c]
+                if valid_citations:
+                    formatted_answer = f"{formatted_answer}\nCitations: {', '.join(valid_citations)}"
+            else:
+                # If no proper citations found, indicate that
+                formatted_answer = f"{formatted_answer}\nCitations: See constitutional provisions referenced above"
+
+        # Add confidence score
+        formatted_answer = f"{formatted_answer}\nConfidence: {confidence:.2f}"
+
+        return formatted_answer
 
     def _create_error_answer(self, query: str, error_msg: str) -> ReasonedAnswer:
         """Create a minimal answer when reasoning fails"""

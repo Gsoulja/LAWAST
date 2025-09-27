@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LAWAST Apertus Chat Client - Using HuggingFace Chat Completion API
+LAWAST Chat Client - Apertus 70B Swiss AI Model
 """
 
 import os
@@ -9,7 +9,7 @@ import time
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
-from huggingface_hub import InferenceClient
+import openai
 import click
 from rich.console import Console
 from rich.markdown import Markdown
@@ -19,22 +19,33 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 # Initialize console
 console = Console()
 
-# Configuration
-API_KEY = os.getenv("HUGGINGFACE_API_KEY")
-MODEL = "swiss-ai/Apertus-8B-Instruct-2509"
+# Apertus 70B Configuration - Swiss AI Platform
+API_KEY = os.getenv("SWISS_AI_PLATFORM_API_KEY", os.getenv("HUGGINGFACE_API_KEY"))
+BASE_URL = "https://api.swisscom.com/layer/swiss-ai-weeks/apertus-70b/v1"
+MODEL = "swiss-ai/Apertus-70B"  # Using 70B model for superior quality
+
 DEFAULT_MAX_TOKENS = 512
 DEFAULT_TEMPERATURE = 0.7
 
 
 class ApertusChatClient:
-    """Client for Apertus model using chat completion API"""
+    """Apertus 70B chat client for Swiss AI Platform"""
 
-    def __init__(self, model: str = MODEL, api_key: Optional[str] = None):
-        """Initialize Apertus chat client"""
+    def __init__(self, model: str = MODEL, api_key: Optional[str] = None, base_url: str = BASE_URL):
+        """Initialize Apertus 70B chat client"""
         self.model = model
         api_key = api_key or API_KEY
-        self.client = InferenceClient(token=api_key)
-        console.print(f"[green]✓[/green] Connected to {model}")
+
+        if not api_key:
+            raise ValueError("API key not found. Please set SWISS_AI_PLATFORM_API_KEY environment variable")
+
+        # Initialize OpenAI-compatible client for Apertus
+        self.client = openai.OpenAI(
+            api_key=api_key,
+            base_url=base_url
+        )
+
+        console.print(f"[green]✓[/green] Connected to {model} via Swiss AI Platform")
 
     def chat(
         self,
@@ -47,7 +58,7 @@ class ApertusChatClient:
         stream: bool = False
     ) -> str:
         """
-        Send a chat message to Apertus
+        Send a chat message to Apertus 70B
 
         Args:
             message: User message
@@ -74,14 +85,33 @@ class ApertusChatClient:
 
         try:
             if stream:
-                return self._stream_chat(messages, max_tokens, temperature, top_p)
-            else:
-                response = self.client.chat_completion(
+                # Use OpenAI client streaming
+                stream = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     max_tokens=max_tokens,
                     temperature=temperature,
                     top_p=top_p,
+                    stream=True
+                )
+
+                console.print("\n[cyan]Assistant:[/cyan]")
+                full_response = ""
+                for chunk in stream:
+                    content = chunk.choices[0].delta.content or ""
+                    console.print(content, end="")
+                    full_response += content
+                console.print()
+                return full_response
+            else:
+                # Use OpenAI client for non-streaming
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    stream=False
                 )
                 return response.choices[0].message.content
 
@@ -89,35 +119,15 @@ class ApertusChatClient:
             console.print(f"[red]Error:[/red] {str(e)}")
             raise
 
-    def _stream_chat(self, messages, max_tokens, temperature, top_p):
-        """Stream chat response"""
-        console.print("\n[cyan]Assistant:[/cyan]")
-        full_response = ""
-
-        for chunk in self.client.chat_completion(
-            model=self.model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            stream=True,
-        ):
-            if chunk.choices[0].delta.content:
-                text = chunk.choices[0].delta.content
-                console.print(text, end="")
-                full_response += text
-
-        console.print()
-        return full_response
 
 
 # CLI Interface
 @click.group()
 @click.option('--model', default=MODEL, help='Model name')
-@click.option('--api-key', envvar='HUGGINGFACE_API_KEY', default=API_KEY, help='API key')
+@click.option('--api-key', envvar='SWISS_AI_PLATFORM_API_KEY', default=API_KEY, help='API key')
 @click.pass_context
 def cli(ctx, model, api_key):
-    """Apertus Chat CLI - Swiss AI Language Model"""
+    """Apertus Chat CLI - Swiss AI Language Model via Swiss AI Platform"""
     ctx.ensure_object(dict)
     ctx.obj['client'] = ApertusChatClient(model, api_key)
 
@@ -177,7 +187,7 @@ def chat(ctx, system, max_tokens, temperature, stream, language):
 
     console.print(Panel.fit(
         "[bold cyan]Apertus Chat Interface[/bold cyan]\n"
-        "Swiss AI Language Model (Apertus-8B-Instruct)\n\n"
+        "Swiss AI Language Model (Apertus-70B)\n\n"
         "Commands: 'exit' to quit, 'clear' to reset, 'help' for help",
         border_style="cyan"
     ))
@@ -280,7 +290,7 @@ def legal(ctx):
     """Start legal assistant mode with Swiss law context"""
     client = ctx.obj['client']
 
-    system_prompt = """You are a Swiss legal assistant powered by Apertus AI.
+    system_prompt = """You are a Swiss legal assistant powered by Apertus 70B AI.
 You have knowledge of Swiss law including the Code of Obligations (OR/CO),
 Civil Code (ZGB/CC), Criminal Code (StGB/CP), and Federal Constitution.
 
@@ -294,7 +304,7 @@ Be helpful, accurate, and thorough in your responses."""
 
     console.print(Panel.fit(
         "[bold cyan]Swiss Legal Assistant (LAWAST)[/bold cyan]\n"
-        "Powered by Apertus-8B-Instruct\n\n"
+        f"Powered by Apertus-70B\n\n"
         "Ask questions about Swiss law in any language.\n"
         "Type 'exit' to quit.",
         border_style="cyan"

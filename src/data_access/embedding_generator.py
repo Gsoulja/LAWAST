@@ -45,7 +45,10 @@ class EmbeddingGenerator:
         self.batch_size = batch_size
 
         if device is None:
-            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            # Force CPU usage to avoid CUDA issues
+            self.device = 'cpu'
+            # Uncomment below to auto-detect (but currently CUDA is problematic)
+            # self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         else:
             self.device = device
 
@@ -280,17 +283,19 @@ class EmbeddingGenerator:
         }
 
 
-def create_embedding_generator(batch_size: int = 32) -> EmbeddingGenerator:
+def create_embedding_generator(batch_size: int = 32, device: str = 'cpu') -> EmbeddingGenerator:
     """
     Convenience function to create an embedding generator.
 
     Args:
         batch_size: Batch size for processing
+        device: Device to use ('cpu' or 'cuda'), defaults to 'cpu'
 
     Returns:
         Configured EmbeddingGenerator instance
     """
     return EmbeddingGenerator(
         model_name="intfloat/multilingual-e5-large",
-        batch_size=batch_size
+        batch_size=batch_size,
+        device=device  # Explicitly pass device, defaulting to CPU
     )

@@ -56,6 +56,7 @@ class GraphSearch:
     """
 
     # Relationship weights for scoring (lower is better)
+    # Optimized for Swiss legal hierarchy: Constitution > Laws > Ordinances
     RELATIONSHIP_WEIGHTS = {
         "REFERENCES": 1.0,
         "CITES": 1.0,
@@ -67,6 +68,21 @@ class GraphSearch:
         "HAS_ACT": 1.3,
         "REPLACES": 1.1,
         "REPLACED_BY": 1.1,
+    }
+
+    # Swiss legal hierarchy weights (for prioritizing results)
+    LEGAL_HIERARCHY_WEIGHTS = {
+        "101": 0.5,      # BV (Constitution) - highest priority
+        "210": 0.7,      # ZGB (Civil Code)
+        "220": 0.7,      # OR (Code of Obligations)
+        "235.1": 0.75,   # DSG (Data Protection)
+        "311.0": 0.75,   # StGB (Criminal Code)
+        "312.0": 0.75,   # StPO (Criminal Procedure)
+        "272": 0.8,      # ZPO (Civil Procedure)
+        "173.71": 0.8,   # BGG (Federal Court Act)
+        "173.110": 0.85, # VwVG (Administrative Procedure)
+        # Default for other laws
+        "default": 0.9
     }
 
     def __init__(self, connection: Optional[Neo4jConnectionManager] = None):
@@ -82,6 +98,7 @@ class GraphSearch:
     def find_seed_nodes(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
         Find seed nodes for graph traversal based on text search.
+        Enhanced to handle Swiss law abbreviations (BV, OR, DSG, etc.)
 
         Args:
             query: Search query text
@@ -90,15 +107,47 @@ class GraphSearch:
         Returns:
             List of seed nodes with basic info
         """
+        # Check if query contains Swiss law abbreviations
+        swiss_law_abbrevs = {
+            "BV": "101", "OR": "220", "DSG": "235.1", "ZGB": "210",
+            "StGB": "311.0", "StPO": "312.0", "ZPO": "272",
+            "SchKG": "281.1", "AIG": "142.20", "RVOG": "172.021",
+            "BGG": "173.71", "VwVG": "173.110", "KVG": "832.10",
+            "UVG": "837.0", "ArG": "813.0"
+        }
+
+        # Build SR number filters if abbreviations found
+        sr_filters = []
+        for abbrev, sr_num in swiss_law_abbrevs.items():
+            if abbrev in query.upper():
+                sr_filters.append(f"n.sr_number STARTS WITH '{sr_num}'")
+
+        # Construct WHERE clause
+        if sr_filters:
+            sr_condition = " OR ".join(sr_filters)
+            where_clause = f"""
+            WHERE (n:Law OR n:Article OR n:Paragraph)
+            AND (
+                {sr_condition}
+                OR toLower(COALESCE(n.title_de, n.title_fr, n.title_it, '')) CONTAINS toLower($query)
+                OR toLower(COALESCE(n.content_full, n.content_preview, n.text, '')) CONTAINS toLower($query)
+                OR n.sr_number CONTAINS $query
+            )
+            """
+        else:
+            where_clause = """
+            WHERE (n:Law OR n:Article OR n:Paragraph)
+            AND (
+                toLower(COALESCE(n.title_de, n.title_fr, n.title_it, '')) CONTAINS toLower($query)
+                OR toLower(COALESCE(n.content_full, n.content_preview, n.text, '')) CONTAINS toLower($query)
+                OR n.sr_number CONTAINS $query
+            )
+            """
+
         # Use text search on indexed properties
-        cypher_query = """
+        cypher_query = f"""
         MATCH (n)
-        WHERE (n:Law OR n:Article OR n:Paragraph)
-        AND (
-            toLower(COALESCE(n.title_de, n.title_fr, n.title_it, '')) CONTAINS toLower($query)
-            OR toLower(COALESCE(n.content_full, n.content_preview, n.text, '')) CONTAINS toLower($query)
-            OR n.sr_number CONTAINS $query
-        )
+        {where_clause}
         WITH n, labels(n)[0] as node_type
         RETURN
             elementId(n) as node_id,
@@ -119,6 +168,14 @@ class GraphSearch:
             END as title,
             n.sr_number as sr_number,
             n.number as article_number
+        ORDER BY
+            CASE
+                WHEN n.sr_number = '101' THEN 1
+                WHEN n.sr_number = '210' THEN 2
+                WHEN n.sr_number = '220' THEN 2
+                WHEN n.sr_number STARTS WITH '235' THEN 3
+                ELSE 4
+            END
         LIMIT $limit
         """
 
@@ -249,9 +306,18 @@ class GraphSearch:
                 seen_uris.add(uri)
 
                 # Calculate score based on path length and relationship types
+                # Extract SR number from URI if available
+                sr_number = None
+                if uri:
+                    import re
+                    sr_match = re.search(r'SR\s*(\d{3}(?:\.\d+)*)', uri)
+                    if sr_match:
+                        sr_number = sr_match.group(1)
+
                 score = self._calculate_path_score(
                     result["path_length"],
-                    result["rel_types"]
+                    result["rel_types"],
+                    sr_number
                 )
 
                 # Create result object
@@ -370,13 +436,15 @@ class GraphSearch:
 
     def _calculate_path_score(self,
                              path_length: int,
-                             relationship_types: List[str]) -> float:
+                             relationship_types: List[str],
+                             sr_number: str = None) -> float:
         """
-        Calculate score based on path characteristics.
+        Calculate score based on path characteristics and legal hierarchy.
 
         Args:
             path_length: Length of the path
             relationship_types: Types of relationships in the path
+            sr_number: SR number of the law (for hierarchy weighting)
 
         Returns:
             Score (higher is better)
@@ -392,7 +460,18 @@ class GraphSearch:
         # Normalize relationship weight
         rel_weight = 1.0 / (rel_weight ** (1.0 / len(relationship_types)))
 
-        return base_score * rel_weight
+        # Apply legal hierarchy weight
+        hierarchy_weight = 1.0
+        if sr_number:
+            # Check for exact match first
+            for sr_prefix, weight in self.LEGAL_HIERARCHY_WEIGHTS.items():
+                if sr_prefix != "default" and sr_number.startswith(sr_prefix):
+                    hierarchy_weight = weight
+                    break
+            else:
+                hierarchy_weight = self.LEGAL_HIERARCHY_WEIGHTS["default"]
+
+        return base_score * rel_weight * (2.0 - hierarchy_weight)  # Invert hierarchy weight for scoring
 
     def get_graph_statistics(self) -> Dict[str, Any]:
         """

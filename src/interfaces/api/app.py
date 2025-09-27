@@ -167,16 +167,60 @@ async def chat_completion(request: ChatCompletionRequest):
         # Extract the last user message
         user_message = request.messages[-1].content
 
+        # Check if this is a metadata/utility request from OpenWebUI
+        is_metadata_request = any([
+            "### Task:" in user_message,
+            "JSON format:" in user_message,
+            "Generate a concise" in user_message,
+            "Generate 1-3 broad tags" in user_message,
+            "Suggest 3-5 relevant follow-up" in user_message
+        ])
+
+        if is_metadata_request:
+            # Handle metadata requests directly with Apertus without legal pipeline
+            print(f"📋 Handling OpenWebUI metadata request directly")
+
+            # Use simple LLM response for these requests
+            from ...articulation.apertus_client import ApertusChatClient
+            client = ApertusChatClient()
+
+            response_text = client.chat(
+                message=user_message,
+                max_tokens=200,
+                temperature=request.temperature
+            )
+
+            # Return in OpenAI format
+            response = ChatCompletionResponse(
+                id=f"chatcmpl-metadata",
+                created=int(datetime.utcnow().timestamp()),
+                model=request.model,
+                choices=[{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": response_text
+                    },
+                    "finish_reason": "stop"
+                }],
+                usage={
+                    "prompt_tokens": len(user_message.split()),
+                    "completion_tokens": len(response_text.split()),
+                    "total_tokens": len(user_message.split()) + len(response_text.split())
+                }
+            )
+            return response
+
         print(f"\n{'='*60}")
         print(f"📥 INCOMING REQUEST from OpenWebUI")
         print(f"{'='*60}")
         print(f"Model: {request.model}")
-        print(f"Query: {user_message}")
+        print(f"Query: {user_message[:100]}...")  # Truncate long queries
         print(f"Session ID: {request.session_id or 'None'}")
         print(f"Temperature: {request.temperature}")
         print(f"{'='*60}\n")
 
-        # Execute pipeline
+        # Execute pipeline for actual legal queries
         if request.session_id:
             print(f"🔄 Processing with session: {request.session_id}")
             result = await pipeline.process_with_session(user_message, request.session_id)
@@ -194,7 +238,22 @@ async def chat_completion(request: ChatCompletionRequest):
         print(f"Trace ID: {result.trace_id}")
         print(f"{'='*60}\n")
 
-        # Format response in OpenAI format
+        # For OpenWebUI integration, we'll return clean answer without duplicating citations/confidence
+        # The pipeline already includes citations and confidence in the structured result
+
+        # Add court decision links if available
+        if hasattr(result, 'court_decisions') and result.court_decisions:
+            from .court_decision_formatter import CourtDecisionFormatter
+            formatter = CourtDecisionFormatter()
+
+            # For markdown-aware clients like OpenWebUI
+            court_decision_text = formatter.format_for_markdown(result.court_decisions)
+
+            # Append formatted court decisions to answer if not already included
+            if "Relevant Court Decisions" not in result.answer:
+                result.answer += court_decision_text
+
+        # Format response in OpenAI format (keeping answer clean)
         response = ChatCompletionResponse(
             id=f"chatcmpl-{result.trace_id or 'unknown'}",
             created=int(datetime.utcnow().timestamp()),
@@ -203,7 +262,7 @@ async def chat_completion(request: ChatCompletionRequest):
                 "index": 0,
                 "message": {
                     "role": "assistant",
-                    "content": result.answer
+                    "content": result.answer  # Clean answer without appended citations
                 },
                 "finish_reason": "stop"
             }],

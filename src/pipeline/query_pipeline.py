@@ -14,9 +14,11 @@ from datetime import datetime
 from ..context.agent import IntelligentAgent, AgentResponse
 from ..context.session_manager import SessionManager
 from ..retrieval.triple_rag import TripleRAG, MergedResult, SearchMetrics
+from ..retrieval.enhanced_triple_rag import EnhancedTripleRAG, EnhancedTripleRAGConfig, EnhancedSearchMetrics
 from ..reasoning.engine import ReasoningEngine, ReasonedAnswer
 from ..reasoning.models import Citation
 from ..articulation.apertus_client import ApertusChatClient
+from ..enrichment.court_decision_client import EntscheidSucheClient, CourtDecisionEnricher
 from .async_wrapper import AsyncWrapper
 from .error_handler import ErrorHandler, PipelineError
 from .performance_monitor import PerformanceMonitor
@@ -32,6 +34,8 @@ class PipelineConfig:
     enable_rag: bool = True
     enable_reasoning: bool = True
     enable_articulation: bool = True
+    enable_legal_logic: bool = True  # Enable Legal Logic AST
+    enable_court_decisions: bool = True  # Enable court decision enrichment
 
     # Performance settings
     timeout_seconds: int = 30
@@ -70,6 +74,7 @@ class PipelineResult:
     citations: List[Citation] = field(default_factory=list)
     reasoning_chain: Optional[List[str]] = None
     sources: Optional[List[Dict[str, Any]]] = None
+    court_decisions: Optional[Dict[str, List[Dict[str, Any]]]] = None  # Court decisions by article
 
     # Metadata
     session_id: Optional[str] = None
@@ -103,6 +108,9 @@ class PipelineResult:
         if self.sources:
             result["sources"] = self.sources
 
+        if self.court_decisions:
+            result["court_decisions"] = self.court_decisions
+
         if self.session_id:
             result["session_id"] = self.session_id
 
@@ -122,6 +130,37 @@ class PipelineResult:
             result["warnings"] = self.warnings
 
         return result
+
+    def format_for_challenge(self) -> Dict[str, Any]:
+        """
+        Format result for Swiss Law RAG Challenge requirements.
+        Returns dictionary with Answer, Citations, and Confidence.
+        """
+        # Format citations in challenge format
+        formatted_citations = []
+        if self.citations:
+            for citation in self.citations[:5]:  # Limit to top 5
+                # Use the challenge format method if available
+                if hasattr(citation, 'format_for_challenge'):
+                    formatted_citations.append(citation.format_for_challenge())
+                elif hasattr(citation, 'law_abbreviation') and citation.law_abbreviation:
+                    # Format with law abbreviation
+                    if citation.article:
+                        if citation.paragraph:
+                            formatted_citations.append(f"Art. {citation.article} Abs. {citation.paragraph} {citation.law_abbreviation}")
+                        else:
+                            formatted_citations.append(f"Art. {citation.article} {citation.law_abbreviation}")
+                    else:
+                        formatted_citations.append(citation.law_abbreviation)
+                else:
+                    # Fallback to string representation
+                    formatted_citations.append(str(citation))
+
+        return {
+            "Answer": self.answer,
+            "Citations": formatted_citations,
+            "Confidence": round(self.confidence, 2) if self.confidence else 0.5
+        }
 
 
 class QueryPipeline:
@@ -170,7 +209,27 @@ class QueryPipeline:
             self.agent = None
 
         if self.config.enable_rag:
-            self.rag = TripleRAG()
+            # Use Enhanced Triple RAG if Legal Logic is enabled
+            if self.config.enable_legal_logic:
+                # Configure Enhanced Triple RAG with Legal Logic
+                enhanced_config = EnhancedTripleRAGConfig(
+                    enable_legal_logic=True,
+                    legal_language="de",  # Default to German
+                    enable_condition_evaluation=True,
+                    legal_logic_weight=0.35,  # Higher weight for legal logic
+                    vector_weight=0.25,
+                    graph_weight=0.25,
+                    hybrid_weight=0.15,
+                    legal_logic_boost=1.2,  # Boost results with legal logic
+                    use_parallel=self.config.use_parallel
+                )
+                self.rag = EnhancedTripleRAG(config=enhanced_config)
+                logger.info("Using Enhanced Triple RAG with Legal Logic AST")
+            else:
+                # Use standard Triple RAG
+                self.rag = TripleRAG()
+                logger.info("Using standard Triple RAG")
+
             if self.agent:
                 self.agent.triple_rag = self.rag
         else:
@@ -179,7 +238,24 @@ class QueryPipeline:
         if self.config.enable_reasoning:
             # Initialize Apertus client for reasoning if needed
             apertus_client = ApertusChatClient() if self.config.enable_articulation else None
-            self.reasoning_engine = ReasoningEngine(apertus_client=apertus_client)
+
+            # Get Neo4j connection from RAG if available
+            neo4j_connection = None
+            if self.rag:
+                # Access the connection directly from TripleRAG
+                neo4j_connection = self.rag.connection
+
+            # Configure reasoning engine to use rule-based reasoning for consistency
+            reasoning_config = {
+                "enable_llm_reasoning": False,  # Use rule-based for consistent results
+                "max_reasoning_steps": 10,
+                "min_confidence_threshold": 0.3
+            }
+            self.reasoning_engine = ReasoningEngine(
+                apertus_client=apertus_client,
+                neo4j_connection=neo4j_connection,
+                config=reasoning_config
+            )
         else:
             self.reasoning_engine = None
 
@@ -188,6 +264,12 @@ class QueryPipeline:
             self.articulator = ApertusChatClient()
         else:
             self.articulator = None
+
+        # Initialize court decision enricher if enabled
+        if self.config.enable_court_decisions:
+            self.court_decision_enricher = CourtDecisionEnricher()
+        else:
+            self.court_decision_enricher = None
 
     async def execute(self,
                      query: str,
@@ -252,12 +334,13 @@ class QueryPipeline:
             rag_results, search_metrics = await self._execute_rag(
                 query,
                 agent_response,
-                trace_id
+                trace_id,
+                context=context
             )
             if rag_results:
                 print(f"   ✓ Retrieved {len(rag_results)} relevant documents")
                 for i, doc in enumerate(rag_results[:3], 1):
-                    print(f"   {i}. {getattr(doc, 'title', 'Document')} (Score: {getattr(doc, 'final_score', 0):.2f})")
+                    print(f"   {i}. {getattr(doc, 'title', 'Document')} (Score: {getattr(doc, 'combined_score', 0):.2f})")
             else:
                 print(f"   ⚠ No documents retrieved")
 
@@ -290,7 +373,23 @@ class QueryPipeline:
             else:
                 print(f"   ⚠ Using fallback response")
 
-            # Compile final result
+            # Stage 5: Court Decision Enrichment (if enabled)
+            # Keep court decisions as separate metadata, don't modify the answer
+            if self.config.enable_court_decisions and self.court_decision_enricher:
+                print(f"\n5️⃣  STAGE 5: COURT DECISION ENRICHMENT")
+                print(f"   Searching for relevant court decisions...")
+                court_decisions = await self._get_court_decisions(
+                    final_answer,
+                    reasoned_answer.citations if reasoned_answer else [],
+                    trace_id
+                )
+                if court_decisions:
+                    print(f"   ✓ Found {len(court_decisions)} relevant court decisions")
+                    result.court_decisions = court_decisions
+                else:
+                    print(f"   ⚠ No court decisions found")
+
+            # Compile final result (answer unchanged)
             result.answer = final_answer
 
             if reasoned_answer:
@@ -380,7 +479,8 @@ class QueryPipeline:
     async def _execute_rag(self,
                           query: str,
                           agent_response: Optional[AgentResponse],
-                          trace_id: str) -> tuple:
+                          trace_id: str,
+                          context: Optional[Dict[str, Any]] = None) -> tuple:
         """Execute RAG retrieval stage"""
         if not self.config.enable_rag or not self.rag:
             return [], None
@@ -400,12 +500,22 @@ class QueryPipeline:
                 elif strategy == "ast":
                     config_override = {"vector_weight": 0.1, "graph_weight": 0.1, "ast_weight": 0.8}
 
-            # RAG is synchronous, wrap in async
-            results, metrics = await self.async_wrapper.run_sync(
-                self.rag.search,
-                query,
-                config_override=config_override
-            )
+            # Check if using Enhanced Triple RAG with Legal Logic
+            if self.config.enable_legal_logic and isinstance(self.rag, EnhancedTripleRAG):
+                # Enhanced RAG can accept context for condition evaluation
+                results, metrics = await self.async_wrapper.run_sync(
+                    self.rag.search,
+                    query,
+                    context=context,
+                    config_override=config_override
+                )
+            else:
+                # Standard RAG doesn't accept context
+                results, metrics = await self.async_wrapper.run_sync(
+                    self.rag.search,
+                    query,
+                    config_override=config_override
+                )
 
             if self.monitor:
                 self.monitor.end_stage(trace_id, "rag")
@@ -505,6 +615,145 @@ class QueryPipeline:
         context += "Provide a clear, accurate answer based on Swiss law."
 
         return context
+
+    async def _get_court_decisions(self,
+                                          answer: str,
+                                          citations: List[Citation],
+                                          trace_id: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
+        """
+        Get relevant court decisions for citations (without modifying answer).
+
+        Args:
+            answer: The generated answer
+            citations: List of citations from reasoning
+            trace_id: Trace ID for logging
+
+        Returns:
+            Dictionary of court decisions by article reference
+        """
+        if not self.court_decision_enricher:
+            return None
+
+        try:
+            # Extract article citations from the answer and citations
+            article_citations = []
+
+            # Extract from citations
+            import re
+            for citation in citations:
+                # First try to get law abbreviation from the citation object itself
+                if hasattr(citation, 'law_abbreviation') and citation.law_abbreviation:
+                    law_abbrev = citation.law_abbreviation
+                elif hasattr(citation, 'sr_number') and citation.sr_number == '101':
+                    law_abbrev = 'BV'
+                else:
+                    law_abbrev = 'BV'  # Default to BV since we're processing BV articles
+
+                # Get article number
+                article_num = None
+                if hasattr(citation, 'article') and citation.article:
+                    article_num = citation.article
+                elif hasattr(citation, 'reference') and citation.reference:
+                    match = re.search(r"Art\.\s*(\d+[a-z]?)", str(citation.reference))
+                    if match:
+                        article_num = match.group(1)
+                elif hasattr(citation, 'source') and citation.source:
+                    match = re.search(r"Art\.\s*(\d+[a-z]?)", str(citation.source))
+                    if match:
+                        article_num = match.group(1)
+
+                # Add citation if we have an article number
+                if article_num and not any(c['article'] == article_num and c['law'] == law_abbrev for c in article_citations):
+                    article_citations.append({
+                        'article': article_num,
+                        'law': law_abbrev
+                    })
+
+            # Also extract from the answer text - but be careful with parsing
+            # Look for explicit law citations like "Art. 114 BV" or "Art. 335b OR"
+            explicit_pattern = r"Art(?:icle|ikel|\.)?\s*(\d+[a-z]?)\s+(BV|OR|DSG|ZGB|StGB|ZPO|StPO)\b"
+            matches = re.findall(explicit_pattern, answer)
+            for article_num, law_abbrev in matches:
+                if not any(c['article'] == article_num and c['law'] == law_abbrev
+                          for c in article_citations):
+                    article_citations.append({
+                        'article': article_num,
+                        'law': law_abbrev
+                    })
+
+            # For articles without explicit law abbreviation in answer, use BV default
+            simple_pattern = r"Art(?:icle|ikel|\.)?\s*(\d+[a-z]?)(?:\s+[A-Z][a-z]|\s*:|\s+\d|\s*$)"
+            simple_matches = re.findall(simple_pattern, answer)
+            for article_num in simple_matches:
+                # Only add if not already present
+                if article_num and not any(c['article'] == article_num for c in article_citations):
+                    article_citations.append({
+                        'article': article_num,
+                        'law': 'BV'  # Default to BV for articles in answer
+                    })
+
+            if not article_citations:
+                logger.info(f"[{trace_id}] No article citations found for court decision enrichment")
+                return None
+
+            logger.info(f"[{trace_id}] Found {len(article_citations)} article citations to enrich")
+
+            # Search for court decisions for each citation
+            court_decisions = {}
+            enrichment_text = ""
+
+            for citation in article_citations[:3]:  # Limit to top 3 citations
+                key = f"Art. {citation['article']} {citation['law']}"
+
+                # Search for court decisions
+                decisions = await self.async_wrapper.run_sync(
+                    self.court_decision_enricher.client.search_by_article,
+                    citation['article'],
+                    citation['law'],
+                    limit=2  # Get top 2 decisions per article
+                )
+
+                if decisions:
+                    court_decisions[key] = [
+                        {
+                            'id': d.decision_id,
+                            'court': d.court,
+                            'date': d.date,
+                            'title': d.title,
+                            'excerpt': d.excerpt,
+                            'url': d.url,
+                            'relevance': d.relevance_score
+                        }
+                        for d in decisions
+                    ]
+
+                    # Add to enrichment text with links
+                    if not enrichment_text:
+                        enrichment_text = "\n\n**📚 Relevant Court Decisions:**\n"
+
+                    enrichment_text += f"\n**{key}:**\n"
+                    for decision in decisions[:2]:
+                        enrichment_text += f"• **{decision.decision_id}** - {decision.court} ({decision.date})\n"
+                        if decision.title:
+                            enrichment_text += f"  *{decision.title[:100]}{'...' if len(decision.title) > 100 else ''}*\n"
+                        if decision.excerpt:
+                            excerpt = decision.excerpt[:150] + "..." if len(decision.excerpt) > 150 else decision.excerpt
+                            enrichment_text += f"  \"{excerpt}\"\n"
+                        if decision.url:
+                            enrichment_text += f"  🔗 [View Full Decision]({decision.url})\n"
+                        enrichment_text += "\n"
+
+            # Return court decisions if found
+            if court_decisions:
+                logger.info(f"[{trace_id}] Found {len(court_decisions)} court decision references")
+                return court_decisions
+            else:
+                return None
+
+        except Exception as e:
+            logger.error(f"[{trace_id}] Error enriching with court decisions: {str(e)}")
+            # Return None on error
+            return None
 
     async def _handle_error(self,
                           error: Exception,
