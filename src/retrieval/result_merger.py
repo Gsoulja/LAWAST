@@ -12,6 +12,7 @@ import numpy as np
 from .vector_search import VectorSearchResult
 from .graph_search import GraphSearchResult
 from .ast_search import ASTSearchResult
+from .hybrid_search import HybridSearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class SearchMethod(Enum):
     VECTOR = "vector"
     GRAPH = "graph"
     AST = "ast"
+    HYBRID = "hybrid"
 
 
 @dataclass
@@ -125,9 +127,10 @@ class ResultMerger:
     """
 
     def __init__(self,
-                 vector_weight: float = 0.4,
-                 graph_weight: float = 0.3,
-                 ast_weight: float = 0.3,
+                 vector_weight: float = 0.3,
+                 graph_weight: float = 0.2,
+                 ast_weight: float = 0.2,
+                 hybrid_weight: float = 0.3,
                  normalization_method: str = "min_max"):
         """
         Initialize result merger.
@@ -136,14 +139,16 @@ class ResultMerger:
             vector_weight: Weight for vector search scores
             graph_weight: Weight for graph search scores
             ast_weight: Weight for AST search scores
+            hybrid_weight: Weight for hybrid search scores
             normalization_method: Method for score normalization
         """
         # Ensure weights sum to 1.0
-        total_weight = vector_weight + graph_weight + ast_weight
+        total_weight = vector_weight + graph_weight + ast_weight + hybrid_weight
         self.weights = {
             SearchMethod.VECTOR.value: vector_weight / total_weight,
             SearchMethod.GRAPH.value: graph_weight / total_weight,
-            SearchMethod.AST.value: ast_weight / total_weight
+            SearchMethod.AST.value: ast_weight / total_weight,
+            SearchMethod.HYBRID.value: hybrid_weight / total_weight
         }
 
         self.normalization_method = normalization_method
@@ -155,6 +160,7 @@ class ResultMerger:
                      vector_results: Optional[List[VectorSearchResult]] = None,
                      graph_results: Optional[List[GraphSearchResult]] = None,
                      ast_results: Optional[List[ASTSearchResult]] = None,
+                     hybrid_results: Optional[List[HybridSearchResult]] = None,
                      top_k: int = 20) -> List[MergedResult]:
         """
         Merge results from multiple search methods.
@@ -207,6 +213,19 @@ class ResultMerger:
                     results_by_uri,
                     result,
                     SearchMethod.AST,
+                    norm_score
+                )
+
+        # Process hybrid results
+        if hybrid_results:
+            normalized_scores = self._normalize_scores(
+                [r.score for r in hybrid_results]
+            )
+            for result, norm_score in zip(hybrid_results, normalized_scores):
+                self._add_result(
+                    results_by_uri,
+                    result,
+                    SearchMethod.HYBRID,
                     norm_score
                 )
 
@@ -344,14 +363,16 @@ class ResultMerger:
         method_counts = {
             SearchMethod.VECTOR.value: 0,
             SearchMethod.GRAPH.value: 0,
-            SearchMethod.AST.value: 0
+            SearchMethod.AST.value: 0,
+            SearchMethod.HYBRID.value: 0
         }
 
         multi_method_count = 0
 
         for result in results:
             for method in result.methods:
-                method_counts[method] += 1
+                if method in method_counts:
+                    method_counts[method] += 1
 
             if len(result.methods) > 1:
                 multi_method_count += 1
@@ -361,6 +382,7 @@ class ResultMerger:
             f"Vector={method_counts[SearchMethod.VECTOR.value]}, "
             f"Graph={method_counts[SearchMethod.GRAPH.value]}, "
             f"AST={method_counts[SearchMethod.AST.value]}, "
+            f"Hybrid={method_counts[SearchMethod.HYBRID.value]}, "
             f"Multi-method={multi_method_count}"
         )
 

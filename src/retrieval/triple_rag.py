@@ -14,6 +14,7 @@ from ..data_access.neo4j_connection import Neo4jConnectionManager
 from .vector_search import VectorSearch, VectorSearchResult
 from .graph_search import GraphSearch, GraphSearchResult
 from .ast_search import ASTSearch, ASTSearchResult
+from .hybrid_search import HybridSearch, HybridSearchResult
 from .result_merger import ResultMerger, MergedResult
 
 logger = logging.getLogger(__name__)
@@ -23,15 +24,22 @@ logger = logging.getLogger(__name__)
 class TripleRAGConfig:
     """Configuration for Triple RAG orchestrator"""
     # Search method weights
-    vector_weight: float = 0.4
-    graph_weight: float = 0.3
-    ast_weight: float = 0.3
+    vector_weight: float = 0.3
+    graph_weight: float = 0.2
+    ast_weight: float = 0.2
+    hybrid_weight: float = 0.3
 
     # Search parameters
     vector_top_k: int = 15
     graph_max_depth: int = 3
     ast_max_results: int = 15
+    hybrid_top_k: int = 15
     final_top_k: int = 20
+
+    # Hybrid search parameters
+    hybrid_vector_weight: float = 0.6
+    hybrid_bm25_weight: float = 0.4
+    enable_hybrid: bool = True
 
     # Score thresholds
     vector_min_score: float = 0.5
@@ -57,20 +65,23 @@ class SearchMetrics:
     vector_time: float = 0.0
     graph_time: float = 0.0
     ast_time: float = 0.0
+    hybrid_time: float = 0.0
     merge_time: float = 0.0
     vector_count: int = 0
     graph_count: int = 0
     ast_count: int = 0
+    hybrid_count: int = 0
     merged_count: int = 0
     cache_hit: bool = False
 
 
 class TripleRAG:
     """
-    Orchestrates Triple RAG search combining:
+    Orchestrates Quad RAG search combining:
     1. Vector similarity search
     2. Graph relationship traversal
     3. AST structural search
+    4. Hybrid vector+BM25 search (for better keyword matching)
     """
 
     def __init__(self,
@@ -95,11 +106,22 @@ class TripleRAG:
         self.graph_search = GraphSearch(connection=self.connection)
         self.ast_search = ASTSearch(connection=self.connection)
 
+        # Initialize hybrid search if enabled
+        if self.config.enable_hybrid:
+            self.hybrid_search = HybridSearch(
+                connection=self.connection,
+                vector_weight=self.config.hybrid_vector_weight,
+                bm25_weight=self.config.hybrid_bm25_weight
+            )
+        else:
+            self.hybrid_search = None
+
         # Initialize result merger
         self.merger = ResultMerger(
             vector_weight=self.config.vector_weight,
             graph_weight=self.config.graph_weight,
             ast_weight=self.config.ast_weight,
+            hybrid_weight=self.config.hybrid_weight if self.config.enable_hybrid else 0,
             normalization_method=self.config.normalization_method
         )
 
@@ -138,11 +160,11 @@ class TripleRAG:
 
         # Execute searches (parallel or sequential)
         if config.use_parallel:
-            vector_results, graph_results, ast_results = self._parallel_search(
+            vector_results, graph_results, ast_results, hybrid_results = self._parallel_search(
                 query, config, metrics
             )
         else:
-            vector_results, graph_results, ast_results = self._sequential_search(
+            vector_results, graph_results, ast_results, hybrid_results = self._sequential_search(
                 query, config, metrics
             )
 
@@ -152,6 +174,7 @@ class TripleRAG:
             vector_results=vector_results,
             graph_results=graph_results,
             ast_results=ast_results,
+            hybrid_results=hybrid_results,
             top_k=config.final_top_k
         )
         metrics.merge_time = time.time() - merge_start
@@ -160,6 +183,7 @@ class TripleRAG:
         metrics.vector_count = len(vector_results) if vector_results else 0
         metrics.graph_count = len(graph_results) if graph_results else 0
         metrics.ast_count = len(ast_results) if ast_results else 0
+        metrics.hybrid_count = len(hybrid_results) if hybrid_results else 0
         metrics.merged_count = len(merged_results)
         metrics.total_time = time.time() - start_time
 
@@ -178,7 +202,8 @@ class TripleRAG:
                         metrics: SearchMetrics) -> Tuple[
                             Optional[List[VectorSearchResult]],
                             Optional[List[GraphSearchResult]],
-                            Optional[List[ASTSearchResult]]
+                            Optional[List[ASTSearchResult]],
+                            Optional[List[HybridSearchResult]]
                         ]:
         """
         Execute searches in parallel.
@@ -194,8 +219,9 @@ class TripleRAG:
         vector_results = None
         graph_results = None
         ast_results = None
+        hybrid_results = None
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:
             # Submit all search tasks
             futures = {}
 
@@ -220,6 +246,14 @@ class TripleRAG:
                 config
             )] = "ast"
 
+            # Hybrid search (if enabled)
+            if config.enable_hybrid and self.hybrid_search:
+                futures[executor.submit(
+                    self._execute_hybrid_search,
+                    query,
+                    config
+                )] = "hybrid"
+
             # Collect results as they complete
             for future in as_completed(futures):
                 search_type = futures[future]
@@ -236,10 +270,14 @@ class TripleRAG:
                         start = time.time()
                         ast_results = future.result()
                         metrics.ast_time = time.time() - start
+                    elif search_type == "hybrid":
+                        start = time.time()
+                        hybrid_results = future.result()
+                        metrics.hybrid_time = time.time() - start
                 except Exception as e:
                     logger.error(f"Error in {search_type} search: {e}")
 
-        return vector_results, graph_results, ast_results
+        return vector_results, graph_results, ast_results, hybrid_results
 
     def _sequential_search(self,
                           query: str,
@@ -247,7 +285,8 @@ class TripleRAG:
                           metrics: SearchMetrics) -> Tuple[
                               Optional[List[VectorSearchResult]],
                               Optional[List[GraphSearchResult]],
-                              Optional[List[ASTSearchResult]]
+                              Optional[List[ASTSearchResult]],
+                              Optional[List[HybridSearchResult]]
                           ]:
         """
         Execute searches sequentially.
@@ -275,7 +314,14 @@ class TripleRAG:
         ast_results = self._execute_ast_search(query, config)
         metrics.ast_time = time.time() - start
 
-        return vector_results, graph_results, ast_results
+        # Hybrid search (if enabled)
+        hybrid_results = None
+        if config.enable_hybrid and self.hybrid_search:
+            start = time.time()
+            hybrid_results = self._execute_hybrid_search(query, config)
+            metrics.hybrid_time = time.time() - start
+
+        return vector_results, graph_results, ast_results, hybrid_results
 
     def _execute_vector_search(self,
                               query: str,
@@ -348,6 +394,41 @@ class TripleRAG:
             )
         except Exception as e:
             logger.error(f"AST search failed: {e}")
+            return None
+
+    def _execute_hybrid_search(self,
+                              query: str,
+                              config: TripleRAGConfig) -> Optional[List[HybridSearchResult]]:
+        """
+        Execute hybrid vector+BM25 search.
+
+        Args:
+            query: Search query
+            config: Search configuration
+
+        Returns:
+            Hybrid search results
+        """
+        if not self.hybrid_search:
+            return None
+
+        try:
+            logger.debug(f"Executing hybrid search for: {query[:50]}...")
+
+            # Generate embedding for hybrid search (reuse vector search's embedding)
+            query_embedding = None
+            if self.vector_search:
+                query_embedding = self.vector_search.generate_query_embedding(query)
+
+            return self.hybrid_search.search(
+                query=query,
+                query_embedding=query_embedding,
+                node_types=config.search_node_types,
+                top_k=config.hybrid_top_k,
+                min_score=config.vector_min_score
+            )
+        except Exception as e:
+            logger.error(f"Hybrid search failed: {e}")
             return None
 
     def _check_cache(self, query: str) -> Optional[List[MergedResult]]:
