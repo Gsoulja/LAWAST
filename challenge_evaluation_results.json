@@ -1,0 +1,67 @@
+{
+  "timestamp": "2025-09-27T06:07:22.977251",
+  "summary": {
+    "passed": 0,
+    "total": 3,
+    "success_rate": 0.0
+  },
+  "results": [
+    {
+      "test_id": "Q.a",
+      "query": "Welche Rechte hat eine Person gem\u00e4ss Bundesverfassung bei der Meinungsfreiheit?",
+      "answer": "Answer: According to Art. 16: Art. 16 Meinungs- und Informationsfreiheit 1 Die Meinungs- und Informationsfreih: Art. 16 Meinungs- und Informationsfreiheit 1 Die Meinungs- und Informationsfreiheit ist gew\u00e4hrleistet. 2 Jede Person hat das Recht, ihre Meinung frei zu bilden und sie ungehindert zu \u00e4ussern und zu verbreiten. 3 Jede Person hat das Recht, Informationen frei zu empfangen, aus allgemein zug\u00e4nglichen Quellen zu beschaffen und zu verbreiten. Jede Person hat das Recht, ihre Meinung frei zu bilden und sie ungehindert zu \u00e4ussern und zu verbreiten.\n\nLegal Analysis: Apply https://fedlex.data.admin.ch/eli/cc/1999/404/version/2000-01-01/de/art_10/para_2 (specificity score: 0.90)\nCitations: Art. 16\nConfidence: 0.77",
+      "confidence": 0.7684285714285713,
+      "execution_time": 2.602984,
+      "citations": [
+        "Art. 16: Art.\u00a016 Meinungs- und Informationsfreiheit\n1\u00a0Die Meinungs- und Informationsfreih"
+      ],
+      "checks": {
+        "has_answer": true,
+        "has_confidence": true,
+        "confidence_acceptable": false,
+        "has_citations": true,
+        "correct_citations": false,
+        "keywords_present": true
+      },
+      "passed": false
+    },
+    {
+      "test_id": "Q.b",
+      "query": "Unter welchen Umst\u00e4nden darf ein Arbeitsvertrag in der Probezeit gek\u00fcndigt werden?",
+      "answer": "Answer: According to Art. 110: Art. 110 Arbeit63* 1 Der Bund kann Vorschriften erlassen \u00fcber: a. den Schutz der: Art. 110 Arbeit63* 1 Der Bund kann Vorschriften erlassen \u00fcber: a. den Schutz der Arbeitnehmerinnen und Arbeitnehmer; b. das Verh\u00e4ltnis zwischen Arbeitgeber- und Arbeitnehmerseite, insbesondere \u00fcber die gemeinsame Regelung betrieblicher und beruflicher Angelegenheiten; c. die Arbeitsvermittlung; d. die Allgemeinverbindlicherkl\u00e4rung von Gesamtarbeitsvertr\u00e4gen. Art. 109 Mietwesen 1 Der Bund erl\u00e4sst Vorschriften gegen Missbr\u00e4uche im Mietwesen, namentlich gegen missbr\u00e4uchliche Mietzinse, sowie \u00fcber die Anfechtbarkeit missbr\u00e4uchlicher K\u00fcndigungen und die befristete Erstreckung von Mietverh\u00e4ltnissen. 2 Er kann Vorschriften \u00fcber die Allgemeinverbindlicherkl\u00e4rung von Rahmenmietvertr\u00e4gen erlassen.\n\nLegal Analysis: Apply https://fedlex.data.admin.ch/eli/cc/1999/404/version/2000-01-01/de/art_27/para_2 (specificity score: 0.90)\nCitations: Art. 110\nConfidence: 0.79",
+      "confidence": 0.7934285714285714,
+      "execution_time": 2.833553,
+      "citations": [
+        "Art. 110: Art.\u00a0110 Arbeit63*\n1\u00a0Der Bund kann Vorschriften erlassen \u00fcber:\na.\nden Schutz der"
+      ],
+      "checks": {
+        "has_answer": true,
+        "has_confidence": true,
+        "confidence_acceptable": true,
+        "has_citations": true,
+        "correct_citations": false,
+        "keywords_present": false
+      },
+      "passed": false
+    },
+    {
+      "test_id": "Q.c",
+      "query": "Welche Datenschutzpflichten bestehen f\u00fcr Bundesbeh\u00f6rden?",
+      "answer": "Answer: According to Art. 164: Art. 164 Gesetzgebung 1 Alle wichtigen rechtsetzenden Bestimmungen sind in der F: Art. 164 Gesetzgebung 1 Alle wichtigen rechtsetzenden Bestimmungen sind in der Form des Bundesgesetzes zu erlassen. Dazu geh\u00f6ren insbesondere die grundlegenden Bestimmungen \u00fcber: a. die Aus\u00fcbung der politischen Rechte; b. die Einschr\u00e4nkungen verfassungsm\u00e4ssiger Rechte; c. die Rechte und Pflichten von Personen; d. Wer staatliche Aufgaben wahrnimmt, ist an die Grundrechte gebunden und verpflichtet, zu ihrer Verwirklichung beizutragen.\nCitations: Art. 164\nConfidence: 0.78",
+      "confidence": 0.7804285714285714,
+      "execution_time": 2.198873,
+      "citations": [
+        "Art. 164: Art.\u00a0164 Gesetzgebung\n1\u00a0Alle wichtigen rechtsetzenden Bestimmungen sind in der F"
+      ],
+      "checks": {
+        "has_answer": true,
+        "has_confidence": true,
+        "confidence_acceptable": false,
+        "has_citations": true,
+        "correct_citations": false,
+        "keywords_present": false
+      },
+      "passed": false
+    }
+  ]
+}
